@@ -1,0 +1,10 @@
+# Godot
+.godot/
+*.tmp
+export/
+# Blender
+*.blend1
+# Sistema
+.DS_Store
+Thumbs.db
+node_modules/

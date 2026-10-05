@@ -1,0 +1,76 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts-local.css"></head><body>
+<script src="lib.js"></script><script src="vehicles.js"></script>
+<script>
+// ===== Ficha: Hangar com os 4 veículos =====
+(async function(){
+await document.fonts.load('40px "Russo One"'); await document.fonts.load('900 20px "Nunito"'); await document.fonts.load('700 20px "Nunito"');
+const ctx = setup(1920,1080);
+// papel
+ctx.fillStyle='#efe6d3'; ctx.fillRect(0,0,W,H);
+ctx.strokeStyle='rgba(120,100,80,0.08)'; ctx.lineWidth=1; for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();} for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+// cabeçalho
+ctx.fillStyle='#22264a'; ctx.font='86px "Russo One"'; ctx.textBaseline='alphabetic'; ctx.fillText('HANGAR', 72, 132);
+ctx.fillStyle='#e5483a'; ctx.fillRect(76,150,250,8);
+ctx.fillStyle='#4a4766'; ctx.font='700 28px Nunito'; ctx.fillText('4 biomas, 4 máquinas — cada pista pede um veículo diferente', 480, 104);
+ctx.font='700 22px Nunito'; ctx.fillStyle='#7a7590'; ctx.fillText('Conceito visual · corrida infinita para frente, desviando de obstáculos e correndo atrás do sol', 480, 140);
+
+const cards=[
+ {name:'FAÍSCA', tag:'TERRA · Canal das Ruínas', stats:[8,6,7], weapon:'Pulso EMP', wdesc:'abre caminho por barreiras', skill:'Vácuo: turbo colado no rival', bio:'canal', draw:(x,y)=>racerRear(ctx,x,y,118,{roll:0})},
+ {name:'MARÉ', tag:'MAR · Mar dos Monólitos', stats:[7,8,6], weapon:'Canhão de bolhas', wdesc:'prende obstáculos e rivais', skill:'Salto: pula sobre as ondas', bio:'mar', draw:(x,y)=>hydroRear(ctx,x,y+40,112,{roll:0})},
+ {name:'ALBATROZ', tag:'AR · Arquipélago do Céu', stats:[9,5,5], weapon:'Rajada de vento', wdesc:'empurra rivais para os lados', skill:'Térmica: ganha altura e planeia', bio:'ceu', draw:(x,y)=>gliderRear(ctx,x,y,108,{roll:-6})},
+ {name:'VAGALUME', tag:'FLORESTA · Floresta Lúmen', stats:[6,9,9], weapon:'Laser de esporos', wdesc:'acende o caminho no escuro', skill:'Escudo de luz: aguenta 1 batida', bio:'floresta', draw:(x,y)=>hoverbikeRear(ctx,x,y,142,{roll:0})},
+];
+const CW=420, CH=830, Y0=196;
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function backdrop(c,x,y,w,h){
+  seed(c.name.length*7);
+  if(c.bio==='canal'){
+    const g=ctx.createLinearGradient(0,y,0,y+h); g.addColorStop(0,'#5aa3e0'); g.addColorStop(0.45,'#cfe6ef'); g.addColorStop(0.46,'#f2e3c2'); g.addColorStop(1,'#e2c99c'); ctx.fillStyle=g; ctx.fillRect(x,y,w,h);
+    cloud(ctx,x+w*0.5,y+h*0.42,w*0.9,110,{lit:'#fffaf0',mid:'#f3ecf2',shd:'#c7c8e6',deep:'#a9acd8',lx:0.6,ly:-0.8});
+    const hy=y+h*0.46; poly(ctx,[[x,y+30],[x+w*0.4,hy],[x+w*0.4,hy+30],[x,y+h]],'#f4e4c4'); poly(ctx,[[x+w,y+30],[x+w*0.6,hy],[x+w*0.6,hy+30],[x+w,y+h]],'#9c97ba');
+    poly(ctx,[[x,y+30],[x+w*0.4,hy],[x+w*0.4,hy+6],[x,y+62]],'#d66e3e'); poly(ctx,[[x+w,y+30],[x+w*0.6,hy],[x+w*0.6,hy+6],[x+w,y+62]],'#8a4a5a');
+    poly(ctx,[[x+w*0.4,hy+30],[x+w*0.6,hy+30],[x+w*0.85,y+h],[x+w*0.15,y+h]],'#93c05a'); poly(ctx,[[x+w*0.48,hy+30],[x+w*0.52,hy+30],[x+w*0.58,y+h],[x+w*0.42,y+h]],'#d6eeea');
+  } else if(c.bio==='mar'){
+    const g=ctx.createLinearGradient(0,y,0,y+h); g.addColorStop(0,'#2f7fd0'); g.addColorStop(0.5,'#bfe9f3'); g.addColorStop(0.51,'#74d3d6'); g.addColorStop(1,'#1f86b3'); ctx.fillStyle=g; ctx.fillRect(x,y,w,h);
+    circle(ctx,x+w*0.78,y+h*0.16,44,css('#f1f6ff',0.75)); circle(ctx,x+w*0.9,y+h*0.08,13,css('#f1f6ff',0.75));
+    cloud(ctx,x+w*0.3,y+h*0.5,w*0.7,90,{lit:'#ffffff',mid:'#f0f6fb',shd:'#c6d9ee',deep:'#a6c0e2',lx:-0.6,ly:-0.8});
+    for(const [mx,mw,mh] of [[0.12,46,170],[0.88,40,200],[0.66,22,90]]){ const bx=x+w*mx, by=y+h*0.51; poly(ctx,[[bx-mw/2,by],[bx-mw*0.4,by-mh],[bx+mw*0.4,by-mh],[bx+mw/2,by]],'#a7bddd'); poly(ctx,[[bx-mw/2,by],[bx-mw*0.4,by-mh],[bx,by-mh],[bx-mw*0.05,by]],'#f3f7fb'); ellipse(ctx,bx,by-mh,mw*0.55,mw*0.18,'#7fbf6a'); }
+    ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=2; for(let k=0;k<40;k++){ const yy=y+h*rnd(0.53,1), xx=x+rnd(0,w), l=rnd(10,40)*(yy-y)/h; ctx.beginPath(); ctx.moveTo(xx,yy); ctx.lineTo(xx+l,yy); ctx.stroke(); }
+  } else if(c.bio==='ceu'){
+    const g=ctx.createLinearGradient(0,y,0,y+h); g.addColorStop(0,'#27306e'); g.addColorStop(0.35,'#a56aa6'); g.addColorStop(0.55,'#ffbf73'); g.addColorStop(0.62,'#ffe3a3'); g.addColorStop(1,'#a786c0'); ctx.fillStyle=g; ctx.fillRect(x,y,w,h);
+    glow(ctx,x+w*0.5,y+h*0.56,260,'#fff2c4',0.8,'screen'); circle(ctx,x+w*0.5,y+h*0.56,46,css('#fffbea'));
+    for(let k=0;k<12;k++) circle(ctx,x+rnd(0,w),y+h*rnd(0.62,1)+20,rnd(40,90),css(pick(['#d6a6c6','#c49ac6','#e9b7c6'])));
+    poly(ctx,[[x+w*0.66,y+h*0.3],[x+w*0.98,y+h*0.3],[x+w*0.86,y+h*0.48]],'#5d4b86'); ellipse(ctx,x+w*0.82,y+h*0.3,w*0.16,10,'#5e8558');
+  } else {
+    const g=ctx.createLinearGradient(0,y,0,y+h); g.addColorStop(0,'#06161f'); g.addColorStop(0.5,'#2b8a8a'); g.addColorStop(0.56,'#8fe3d0'); g.addColorStop(0.58,'#1d4a50'); g.addColorStop(1,'#0a2a30'); ctx.fillStyle=g; ctx.fillRect(x,y,w,h);
+    for(const [tx,tw] of [[0.08,60],[0.92,70],[0.3,26],[0.72,22]]){ ctx.fillStyle=tw>40?'#06181b':'#2a6f70'; ctx.fillRect(x+w*tx-tw/2,y,tw,h*0.58); }
+    ctx.fillStyle='#0b2328'; ctx.beginPath(); ctx.ellipse(x+w*0.5,y+h*0.2,120,40,0,Math.PI,TAU); ctx.fill(); ellipse(ctx,x+w*0.5,y+h*0.2,120,12,css('#62fbe6',0.5)); ctx.fillStyle='#0b2328'; ctx.fillRect(x+w*0.5-8,y+h*0.2,16,h*0.4);
+    for(let k=0;k<70;k++){ const c2=pick(['#62fbe6','#c4ff6a','#ff5fd2']), px=x+rnd(0,w), py=y+rnd(0,h); circle(ctx,px,py,rnd(1,3),css(c2,0.9)); glow(ctx,px,py,10,c2,0.25); }
+  }
+}
+cards.forEach((c,i)=>{
+  const x=75+i*(CW+30), y=Y0;
+  // sombra do cartão
+  rr(x+8,y+12,CW,CH,30); ctx.fillStyle='rgba(40,30,60,0.18)'; ctx.fill();
+  ctx.save(); rr(x,y,CW,CH,30); ctx.clip();
+  backdrop(c,x,y,CW,520);
+  c.draw(x+CW/2, y+320);
+  // painel de informações
+  ctx.fillStyle='#1f2245'; ctx.fillRect(x,y+500,CW,CH-500);
+  ctx.fillStyle='#e5483a'; ctx.fillRect(x,y+500,CW,6);
+  ctx.fillStyle='#ffffff'; ctx.font='46px "Russo One"'; ctx.fillText(c.name, x+28, y+566);
+  ctx.fillStyle='#8fe3d0'; ctx.font='900 18px Nunito'; ctx.fillText(c.tag.toUpperCase(), x+30, y+596);
+  const labels=['VELOCIDADE','CONTROLE','ACELERAÇÃO'];
+  labels.forEach((lb,k)=>{ const yy=y+632+k*34; ctx.fillStyle='#b9b6d6'; ctx.font='700 16px Nunito'; ctx.fillText(lb, x+30, yy+12);
+    for(let s=0;s<10;s++){ ctx.fillStyle= s<c.stats[k] ? (k===0?'#ffb347':k===1?'#5fd0c8':'#ff6f91') : 'rgba(255,255,255,0.12)'; rr(x+170+s*22,yy,18,14,4); ctx.fill(); } });
+  ctx.fillStyle='#ffd36e'; ctx.font='900 18px Nunito'; ctx.fillText('ARMA  ·  '+c.weapon.toUpperCase(), x+30, y+758);
+  ctx.fillStyle='#d7d5ea'; ctx.font='700 17px Nunito'; ctx.fillText(c.wdesc, x+30, y+781);
+  ctx.fillStyle='#9ff7e6'; ctx.font='700 17px Nunito'; ctx.fillText('★ '+c.skill, x+30, y+810);
+  ctx.restore();
+  rr(x,y,CW,CH,30); ctx.strokeStyle='#22264a'; ctx.lineWidth=4; ctx.stroke();
+  ctx.fillStyle='#22264a'; ctx.font='26px "Russo One"'; ctx.fillText('0'+(i+1), x+CW-62, y-14);
+});
+finish(ctx, {grain:8, paper:6, vignette:0.12});
+window.DONE=true;
+})();
+</script></body></html>

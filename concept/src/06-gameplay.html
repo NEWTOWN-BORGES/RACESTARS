@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts-local.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1920px;height:1080px;overflow:hidden;font-family:Nunito,sans-serif;font-weight:700;color:#fff;
+  background:radial-gradient(ellipse at 50% 40%,#2c3170 0%,#171a3a 60%,#0e1028 100%);position:relative}
+.title{position:absolute;left:150px;top:40px;font-family:'Russo One';font-size:44px;letter-spacing:1px}
+.title small{display:block;font-family:Nunito;font-weight:700;font-size:22px;color:#aeb2e0;letter-spacing:0;margin-top:4px}
+.phone{position:absolute;left:140px;top:150px;width:1640px;height:790px;border-radius:96px;background:#08080f;
+  box-shadow:0 30px 80px rgba(0,0,0,.55),inset 0 0 0 3px #2a2d44,inset 0 0 0 10px #101220}
+.cam{position:absolute;left:44px;top:375px;width:16px;height:40px;border-radius:10px;background:#1b1d2c}
+.screen{position:absolute;left:84px;top:30px;width:1500px;height:730px;border-radius:58px;overflow:hidden;
+  background:url(01-canal-hud.png) center/cover}
+.hud{position:absolute;inset:0;padding:26px 34px}
+.sun{position:absolute;left:34px;top:26px;display:flex;align-items:center;gap:14px}
+.sunicon{width:58px;height:58px;border-radius:50%;background:radial-gradient(circle,#fff6c8 0 38%,#ffb347 40% 60%,rgba(255,179,71,0) 62%);filter:drop-shadow(0 0 10px #ffcf6a)}
+.bar{width:300px;margin:4px 0;height:22px;border-radius:12px;background:rgba(20,22,50,.55);border:3px solid rgba(255,255,255,.85);overflow:hidden;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;width:72%;background:linear-gradient(90deg,#ff6a3d,#ffb347 60%,#ffe59a)}
+.sunlbl{font-family:'Russo One';font-size:20px;-webkit-text-stroke:3px rgba(28,30,72,.7);paint-order:stroke fill}
+.sunlbl small{display:block;font-family:Nunito;font-weight:900;font-size:15px;color:#fff3d6}
+.dist{position:absolute;left:50%;top:18px;transform:translateX(-50%);text-align:center;font-family:'Russo One';font-size:58px;-webkit-text-stroke:3px rgba(28,30,72,.75);paint-order:stroke fill;
+  text-shadow:0 4px 0 rgba(30,30,70,.45)}
+.dist small{display:block;font-family:Nunito;font-weight:900;font-size:20px;color:#ffd36e;margin-top:-6px;-webkit-text-stroke:3px rgba(28,30,72,.8);paint-order:stroke fill}
+.gems{position:absolute;right:120px;top:30px;display:flex;align-items:center;gap:10px;font-family:'Russo One';font-size:34px;text-shadow:0 3px 0 rgba(30,30,70,.45)}
+.gem{width:26px;height:38px;background:linear-gradient(90deg,#ffe9a3 50%,#ff9d2e 50%);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);filter:drop-shadow(0 0 6px #ffd36e)}
+.pause{position:absolute;right:34px;top:24px;width:62px;height:62px;border-radius:50%;background:rgba(20,22,50,.5);border:3px solid rgba(255,255,255,.85);display:flex;align-items:center;justify-content:center;gap:8px}
+.pause b{width:8px;height:24px;background:#fff;border-radius:3px}
+.steer{position:absolute;left:34px;bottom:30px;width:300px;height:120px;border-radius:60px;background:rgba(20,22,50,.32);border:3px dashed rgba(255,255,255,.6);
+  display:flex;align-items:center;justify-content:space-between;padding:0 30px;font-family:'Russo One';font-size:50px;color:rgba(255,255,255,.9)}
+.steer span{font-family:Nunito;font-weight:900;font-size:16px;letter-spacing:2px}
+.speed{position:absolute;left:380px;bottom:36px;font-family:'Russo One';font-style:italic;font-size:64px;-webkit-text-stroke:3px rgba(28,30,72,.7);paint-order:stroke fill;text-shadow:0 4px 0 rgba(30,30,70,.45)}
+.speed small{font-size:22px;margin-left:6px}
+.btn{position:absolute;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Russo One';font-size:16px}
+.weapon{right:46px;bottom:40px;width:150px;height:150px;background:conic-gradient(#7ff6ff 0 70%,rgba(255,255,255,.18) 70% 100%);padding:9px}
+.weapon .in{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 40% 35%,#3a4c9a,#1c2150);display:flex;flex-direction:column;align-items:center;justify-content:center;border:3px solid rgba(255,255,255,.85)}
+.boost{right:220px;bottom:46px;width:100px;height:100px;background:radial-gradient(circle at 40% 35%,#ff7a5a,#c2343c);border:3px solid rgba(255,255,255,.9);font-size:14px}
+.boost b{font-size:34px;line-height:1;margin-top:-4px}
+.warn{position:absolute;left:640px;top:300px;width:58px;height:52px;background:#ff4d4d;clip-path:polygon(50% 0,100% 100%,0 100%);
+  display:flex;align-items:flex-end;justify-content:center;font-family:'Russo One';font-size:30px;padding-bottom:2px;filter:drop-shadow(0 0 8px #ff4d4d)}
+.combo{-webkit-text-stroke:4px #6a2a2a;paint-order:stroke fill;position:absolute;left:50%;top:150px;transform:translateX(-50%) rotate(-4deg);font-family:'Russo One';font-size:30px;color:#ffd36e;text-shadow:0 3px 0 #8a3a2a;opacity:.95}
+.notes{position:absolute;left:150px;right:150px;bottom:34px;display:flex;gap:16px;justify-content:center}
+.chip{background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.18);border-radius:40px;padding:10px 20px;font-size:19px;color:#e6e7fb;white-space:nowrap}
+.chip b{color:#ffd36e;font-weight:900}
+</style></head><body>
+<div class="title">GAMEPLAY — tela no celular <small>Mock-up de interface sobre o Canal das Ruínas</small></div>
+<div class="phone"><div class="cam"></div>
+ <div class="screen"><div class="hud">
+  <div class="sun"><div class="sunicon"></div><div><div class="sunlbl">SOL 72%</div><div class="bar"><i></i></div><div class="sunlbl"><small>pegue cristais pro sol não se pôr</small></div></div></div>
+  <div class="dist">2.847 m<small>RECORDE 3.120 m</small></div>
+  <div class="gems"><div class="gem"></div>128</div>
+  <div class="pause"><b></b><b></b></div>
+  <div class="combo">QUASE! +50</div>
+  <div class="warn">!</div>
+  <div class="steer">‹<span>ARRASTE</span>›</div>
+  <div class="speed">412<small>km/h</small></div>
+  <div class="btn boost"><b>»</b>TURBO</div>
+  <div class="btn weapon"><div class="in">
+    <svg width="54" height="54" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" fill="#7ff6ff" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg>EMP</div></div>
+ </div></div>
+</div>
+<div class="notes">
+ <div class="chip"><b>Arraste</b> para desviar dos blocos</div>
+ <div class="chip"><b>Cristais de sol</b> recarregam a barra do sol</div>
+ <div class="chip"><b>Raspar</b> num obstáculo dá bônus "QUASE!"</div>
+ <div class="chip"><b>EMP</b> destrói 1 barreira (recarrega)</div>
+</div>
+<script>document.fonts.ready.then(()=>Promise.all([document.fonts.load('40px "Russo One"'),document.fonts.load('900 20px Nunito')])).then(()=>{ const im=new Image(); im.onload=()=>{window.DONE=true}; im.src='01-canal-hud.png'; });</script>
+</body></html>
