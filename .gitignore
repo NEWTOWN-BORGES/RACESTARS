@@ -8,3 +8,4 @@ export/
 .DS_Store
 Thumbs.db
 node_modules/
+blender/__pycache__/
