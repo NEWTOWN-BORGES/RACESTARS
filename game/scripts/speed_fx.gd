@@ -62,19 +62,31 @@ func _make_streaks() -> void:
 func _make_dust() -> void:
 	dust = CPUParticles3D.new()
 	var q := QuadMesh.new()
-	q.size = Vector2(0.9, 0.9)
+	q.size = Vector2(2.4, 2.4)
 	var m := _unshaded(Color(0.96, 0.85, 0.66, 0.45), false)
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# nuvem redonda e macia (sem textura ficariam quadrados)
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(0.5, 0.0)
+	tex.width = 64
+	tex.height = 64
+	m.albedo_texture = tex
 	q.material = m
 	dust.mesh = q
-	dust.amount = 70
-	dust.lifetime = 0.9
+	dust.amount = 90
+	dust.lifetime = 0.45
 	dust.local_coords = false
 	dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	dust.emission_box_extents = Vector3(1.6, 0.1, 0.6)
-	dust.position = Vector3(0.0, 0.2, 2.2)
-	dust.direction = Vector3(0, 0.35, 1)
-	dust.spread = 25.0
+	dust.emission_box_extents = Vector3(3.2, 0.1, 5.0)
+	dust.position = Vector3(0.0, -0.6, 2.0)
+	dust.direction = Vector3(0, 0.5, 1)
+	dust.spread = 40.0
 	dust.gravity = Vector3(0, -2.0, 0)
 	dust.initial_velocity_min = 4.0
 	dust.initial_velocity_max = 12.0
@@ -88,17 +100,18 @@ func _make_dust() -> void:
 func _make_trail() -> void:
 	trail = CPUParticles3D.new()
 	var sm := SphereMesh.new()
-	sm.radius = 0.16
-	sm.height = 0.32
+	sm.radius = 0.22
+	sm.height = 0.44
 	sm.radial_segments = 6
 	sm.rings = 3
-	sm.material = _unshaded(Color(0.5, 0.95, 1.0, 0.8), true)
+	sm.material = _unshaded(Color(1.0, 0.5, 0.22, 0.6), true)
 	trail.mesh = sm
 	trail.amount = 90
-	trail.lifetime = 0.35
+	trail.lifetime = 0.16
 	trail.local_coords = false
 	trail.emission_shape = CPUParticles3D.EMISSION_SHAPE_POINTS
-	trail.emission_points = PackedVector3Array([Vector3(-1.5, 1.6, 1.9), Vector3(1.5, 1.6, 1.9), Vector3(0.0, 1.6, 2.1)])
+	# bocais de escape das duas turbinas da Vespa
+	trail.emission_points = PackedVector3Array([Vector3(-2.3, 1.3, 0.7), Vector3(2.3, 1.3, 0.7)])
 	trail.direction = Vector3(0, 0, 1)
 	trail.spread = 4.0
 	trail.gravity = Vector3.ZERO
@@ -108,7 +121,7 @@ func _make_trail() -> void:
 	curve.add_point(Vector2(0, 1))
 	curve.add_point(Vector2(1, 0))
 	trail.scale_amount_curve = curve
-	trail.color_ramp = _fade_ramp(Color(0.55, 0.95, 1.0, 0.7))
+	trail.color_ramp = _fade_ramp(Color(1.0, 0.5, 0.25, 0.55))
 	trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	trail.emitting = false
 	player.add_child(trail)
@@ -126,13 +139,13 @@ func _make_blur() -> void:
 	blur.visible = false
 	blur_layer.add_child(blur)
 
-func update(running: bool, speed: float, frac: float, in_tunnel: bool) -> void:
+func update(running: bool, speed: float, frac: float, in_tunnel: bool, on_ground := true) -> void:
 	if player == null:
 		return
 	streaks.emitting = running
 	streaks.initial_velocity_min = speed * 1.4 + 30.0
 	streaks.initial_velocity_max = speed * 1.9 + 40.0
-	dust.emitting = running and not in_tunnel
+	dust.emitting = running and on_ground and not in_tunnel and speed > 25.0
 	trail.emitting = running
 	var s := (0.012 + 0.06 * pow(frac, 1.3)) if running else 0.0
 	blur.visible = blur_enabled and s > 0.005

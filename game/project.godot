@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="RACESTARS"
-config/description="Corrida infinita: corra e desvie."
+config/description="Corrida contra o relógio num deserto gigante."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"

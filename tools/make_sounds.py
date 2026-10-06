@@ -47,6 +47,28 @@ def engine():
     air = fft_filter(rng.standard_normal(len(t)), band(250, 1600)) * 0.25
     return x * 0.6 + whine + air / (np.std(air) + 1e-9) * 0.12
 
+# ---------------------------------------------------------------- turbinas do podracer (loop 2 s)
+def pod_engine():
+    """Rugido áspero: dente-de-serra grave com pulsos de combustão irregulares,
+    estalidos e um assobio de turbina por cima. 2 s exatos para emendar."""
+    t = t_axis(2.0); n = len(t)
+    f0 = 55.0  # 110 ciclos em 2 s -> fecha o loop
+    saw = sum(((-1) ** (k + 1)) / k * np.sin(2 * np.pi * f0 * k * t) for k in range(1, 28))
+    # pulsos de combustão (frequência inteira de ciclos no loop)
+    puls = 0.6 + 0.4 * np.abs(np.sin(2 * np.pi * 27.5 * t)) ** 3
+    rough = fft_filter(rng.standard_normal(n), band(60, 900))
+    rough = rough / np.std(rough)
+    x = saw * puls * 0.55 + rough * puls * 0.35
+    x = np.tanh(x * 1.6)
+    crack = np.zeros(n)
+    for _ in range(90):
+        s0 = rng.integers(0, n); L = int(rng.uniform(0.002, 0.008) * SR)
+        idx = (np.arange(L) + s0) % n
+        crack[idx] += rng.standard_normal(L) * np.exp(-np.arange(L) / (L / 3)) * rng.uniform(0.3, 1.0)
+    crack = fft_filter(crack, band(1500, 7000))
+    whine = 0.06 * np.sin(2 * np.pi * 1210 * t) + 0.04 * np.sin(2 * np.pi * 1815 * t)
+    return x + crack * 0.5 + whine
+
 # ---------------------------------------------------------------- vento (loop 4 s)
 def wind():
     t = t_axis(4.0)
@@ -85,6 +107,38 @@ def start():
         s = int(i * 0.11 * SR); tt = t[: len(t) - s]
         x[s:] += (np.sin(2 * np.pi * f * tt) + 0.3 * np.sin(4 * np.pi * f * tt)) * np.exp(-tt / 0.35)
     return x
+
+# ---------------------------------------------------------------- contagem, portões, chegada, raspão
+def beep(f, dur=0.32):
+    t = t_axis(dur)
+    x = (np.sin(2 * np.pi * f * t) + 0.25 * np.sin(6 * np.pi * f * t)) * np.minimum(1, t / 0.005)
+    return x * np.exp(-t / (dur * 0.55))
+
+def checkpoint():
+    t = t_axis(0.7); x = np.zeros(len(t))
+    for i, f in enumerate([987.77, 1318.5]):
+        s = int(i * 0.08 * SR); tt = t[: len(t) - s]
+        x[s:] += (np.sin(2 * np.pi * f * tt) + 0.4 * np.sin(4 * np.pi * f * tt) * np.exp(-tt / 0.05)) * np.exp(-tt / 0.22)
+    return x
+
+def finish():
+    t = t_axis(2.6); x = np.zeros(len(t))
+    seq = [(0.0, [523.25, 659.25, 783.99]), (0.18, [587.33, 739.99, 880.0]), (0.36, [659.25, 830.61, 987.77]),
+           (0.6, [783.99, 987.77, 1174.66, 1567.98])]
+    for st, fs in seq:
+        s = int(st * SR); tt = t[: len(t) - s]
+        d = 1.4 if st > 0.5 else 0.16
+        for f in fs:
+            x[s:] += sum(np.sin(2 * np.pi * f * k * tt) / k ** 1.5 for k in range(1, 5)) * np.exp(-tt / d) * np.minimum(1, tt / 0.01)
+    return x
+
+def scrape():
+    t = t_axis(0.5); n = len(t)
+    nz = fft_filter(rng.standard_normal(n), band(1800, 7000))
+    grit = (rng.random(n) < 0.02) * rng.standard_normal(n) * 4
+    ring = sum(a * np.sin(2 * np.pi * f * t) for f, a in [(1630, 0.3), (2410, 0.2), (3170, 0.12)])
+    e = np.minimum(1, t / 0.01) * np.exp(-t / 0.16)
+    return (nz / np.std(nz) + fft_filter(grit, band(1000, 8000)) + ring) * e
 
 # ---------------------------------------------------------------- música (loop 8 compassos, 100 bpm)
 def note(n):  # MIDI -> Hz
@@ -138,7 +192,12 @@ def music():
     return mix
 
 if __name__ == '__main__':
-    save('engine_loop', engine(), 0.8)
+    save('engine_loop', pod_engine(), 0.8)
+    save('beep', beep(880.0), 0.7)
+    save('go', beep(1760.0, 0.6), 0.8)
+    save('checkpoint', checkpoint(), 0.75)
+    save('finish', finish(), 0.85)
+    save('scrape', scrape(), 0.8)
     save('wind_loop', wind(), 0.8)
     save('whoosh', whoosh(), 0.9)
     save('crash', crash(), 0.95)

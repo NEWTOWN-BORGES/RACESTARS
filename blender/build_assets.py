@@ -45,6 +45,11 @@ PAL = {
     'cap_violet': {'c': '#7a5aa8'}, 'stem': {'c': '#eadfcc'},
     'tunnel': {'c': '#2f2a4c'}, 'tunnel_floor': {'c': '#1d1a30'},
     'window': {'c': '#352c3e'},
+    # veículo 'Vespa' (dois motores puxando a cabine)
+    'p_orange': {'c': '#d9692e', 'r': 0.55}, 'p_rust': {'c': '#8e3b22', 'r': 0.8}, 'p_metal': {'c': '#8d9096', 'r': 0.45},
+    'p_dark': {'c': '#26262c', 'r': 0.6}, 'p_cream': {'c': '#e8dcc6', 'r': 0.6},
+    'p_beam': {'c': '#ffb0f0', 'e': '#ff4fd8', 's': 5.0, 'r': 0.3}, 'p_fire': {'c': '#ffd8a0', 'e': '#ffa040', 's': 5.0, 'r': 0.3},
+    'rock': {'c': '#c99a68'}, 'rock_dark': {'c': '#8a5a3c'},
     # veículo
     'v_white': {'c': '#f4eee2', 'r': 0.5}, 'v_red': {'c': '#e5483a', 'r': 0.5}, 'v_navy': {'c': '#272b47', 'r': 0.6},
     'v_glass': {'c': '#1d4558', 'r': 0.1}, 'v_helmet': {'c': '#ff9d2e', 'r': 0.4},
@@ -536,6 +541,123 @@ def make_ridge(name):
         m.cube('neon_cyan', T(0, yface + sgn * 1.0, TUN_WALL + TUN_ARCH + 3.2) @ RY(45) @ S(1.6, 0.3, 1.6))
     return m.done()
 
+# ------------------------------------------------------------------ mesa com gruta e teto de pedra (mapa da corrida)
+def make_cave_mesa(name, L=680.0, W=400.0, Hm=58.0):
+    """Mesa enorme atravessada por uma gruta reta (atalho). Gruta ao longo de +Y, chão em z=0."""
+    m = Mesh(name)
+    THW, TWALL, TARCH = 13.0, 10.0, 6.0
+    def width(y): return W * (0.45 + 0.55 * math.sin(math.pi * y / L)) / 2
+    def top(x, y): return Hm + 7 * noise.noise(Vector((x * 0.02, y * 0.02, 1.3))) + 4 * noise.noise(Vector((x * 0.07, y * 0.07, 4.1)))
+    def atop(x): return TWALL + TARCH * math.sqrt(max(0.0, 1 - (x / THW) ** 2))
+    def band(z): return BANDS[int((z + 40) / 6.5) % 4]
+    us = [i / 14.0 - 1 for i in range(29)]
+    ys = [i * L / 60 for i in range(61)]
+    grid = [[m.bm.verts.new((u * width(y), y, top(u * width(y), y))) for u in us] for y in ys]
+    for j in range(len(ys) - 1):
+        for i in range(len(us) - 1):
+            f = m.bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i])); f.normal_update()
+            if f.normal.z < 0: f.normal_flip()
+            f.material_index = m.mi('moss' if f.normal.z > 0.9 else 'sand')
+    BOT = -22.0
+    for sx in (-1, 1):  # paredões laterais
+        for y0, y1 in zip(ys, ys[1:]):
+            x0, x1 = sx * width(y0), sx * width(y1)
+            t0, t1 = top(x0, y0), top(x1, y1)
+            for k in range(6):
+                za0, za1 = lerp(BOT, t0, k / 6), lerp(BOT, t0, (k + 1) / 6)
+                zb0, zb1 = lerp(BOT, t1, k / 6), lerp(BOT, t1, (k + 1) / 6)
+                bulge = lambda z, y: 2.5 * noise.noise(Vector((y * 0.05, z * 0.08, sx * 3.0)))
+                pts = [(x0 + sx * bulge(za0, y0), y0, za0), (x1 + sx * bulge(zb0, y1), y1, zb0), (x1 + sx * bulge(zb1, y1), y1, zb1), (x0 + sx * bulge(za1, y0), y0, za1)]
+                m.face(band((za0 + za1) / 2), pts, want=(sx, 0, 0))
+    ts = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+    for yf, sg in ((0.0, -1), (L, 1)):  # faces da frente e de trás com a boca da gruta
+        w = width(yf)
+        cols_l = [-w + (w - THW) * i / 10 for i in range(11)]
+        cols_in = [-THW + i * 1.3 for i in range(21)]
+        cols_r = [THW + (w - THW) * i / 10 for i in range(11)]
+        for group, zb in ((cols_l, lambda x: BOT), (cols_in, atop), (cols_r, lambda x: BOT)):
+            for a, b in zip(group, group[1:]):
+                Ha, Hb = top(a, yf), top(b, yf)
+                for t0, t1 in zip(ts, ts[1:]):
+                    za0, za1 = lerp(zb(a), Ha, t0), lerp(zb(a), Ha, t1); zb0, zb1 = lerp(zb(b), Hb, t0), lerp(zb(b), Hb, t1)
+                    m.face(band((za0 + za1 + zb0 + zb1) / 4), [(a, yf, za0), (b, yf, zb0), (b, yf, zb1), (a, yf, za1)], want=(0, sg, 0))
+    sec = [(-THW, -1.0), (-THW, TWALL)] + [(x, atop(x)) for x in cols_in[1:-1]] + [(THW, TWALL), (THW, -1.0)]
+    for y0, y1 in zip(ys, ys[1:]):  # interior da gruta
+        for (xa, za), (xb, zb_) in zip(sec, sec[1:]):
+            cx, cz = (xa + xb) / 2, (za + zb_) / 2
+            jit = lambda x, z, y: Vector((0.8 * noise.noise(Vector((x * 0.2, y * 0.05, z * 0.2))), 0, 0.6 * noise.noise(Vector((z * 0.2, y * 0.05, x * 0.2)))))
+            pa = Vector((xa, y0, za)) + jit(xa, za, y0); pb = Vector((xb, y0, zb_)) + jit(xb, zb_, y0)
+            pc = Vector((xb, y1, zb_)) + jit(xb, zb_, y1); pd = Vector((xa, y1, za)) + jit(xa, za, y1)
+            m.face('rock_dark', [pa, pb, pc, pd], want=(-cx, 0, 4.0 - cz))
+    return m.done()
+
+def make_canyon_roof(name, L=180.0, W=100.0):
+    """Laje de pedra que cobre o desfiladeiro estreito: vira caverna com luz no fim."""
+    m = Mesh(name)
+    nx, ny = 26, 46
+    def bottom(x, y):
+        z = 27 + 4 * noise.noise(Vector((x * 0.05, y * 0.05, 2.0))) + 2 * noise.noise(Vector((x * 0.2, y * 0.2, 5.0)))
+        spike = max(0.0, noise.noise(Vector((x * 0.11, y * 0.11, 9.0))) - 0.25) * 18
+        return z - spike
+    xs = [-W / 2 + W * i / (nx - 1) for i in range(nx)]; ys = [L * j / (ny - 1) for j in range(ny)]
+    bot = [[m.bm.verts.new((x, y, bottom(x, y))) for x in xs] for y in ys]
+    TOP = 80.0
+    topv = [[m.bm.verts.new((x, y, TOP)) for x in xs] for y in ys]
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            f = m.bm.faces.new((bot[j][i], bot[j][i + 1], bot[j + 1][i + 1], bot[j + 1][i])); f.normal_update()
+            if f.normal.z > 0: f.normal_flip()
+            f.material_index = m.mi('rock_dark')
+            g = m.bm.faces.new((topv[j][i], topv[j][i + 1], topv[j + 1][i + 1], topv[j + 1][i])); g.normal_update()
+            if g.normal.z < 0: g.normal_flip()
+            g.material_index = m.mi('sand')
+    for j, sg in ((0, -1), (ny - 1, 1)):  # bordas da frente e de trás (entrada da caverna)
+        for i in range(nx - 1):
+            f = m.bm.faces.new((bot[j][i], bot[j][i + 1], topv[j][i + 1], topv[j][i])); f.normal_update()
+            if f.normal.y * sg < 0: f.normal_flip()
+            f.material_index = m.mi(BANDS[i % 4])
+    return m.done()
+
+# ------------------------------------------------------------------ veículo da corrida
+def make_vespa(name):
+    """'Vespa': dois motores grandes à frente puxando uma cabine pequena (frente = +Y)."""
+    m = Mesh(name)
+    zc = 1.3
+    for sx in (-1, 1):
+        x = sx * 2.3
+        m.cone('p_orange', 0.85, 0.8, 5.6, T(x, 7.6, zc) @ RX(-90), segs=16)
+        m.cone('p_rust', 0.82, 0.62, 1.2, T(x, 4.2, zc) @ RX(-90), segs=16)
+        for yb in (5.6, 7.4, 9.2):
+            m.cone('p_metal', 0.88, 0.88, 0.22, T(x, yb, zc) @ RX(-90), segs=16, caps=False)
+        m.cone('p_dark', 0.95, 0.86, 0.5, T(x, 10.6, zc) @ RX(-90), segs=16)
+        m.cone('p_metal', 0.7, 0.7, 0.05, T(x, 10.86, zc) @ RX(-90), segs=12)
+        for k in range(12):  # coroa de espinhos na entrada de ar
+            a = k / 12 * math.tau
+            p = Vector((x + math.cos(a) * 0.95, 10.75, zc + math.sin(a) * 0.95))
+            d = Vector((math.cos(a) * 0.5, 1.0, math.sin(a) * 0.5)).normalized()
+            m.cone('p_metal', 0.12, 0.0, 0.55, T(*p) @ align_z(d) @ T(0, 0, 0.27), segs=4)
+        m.cone('p_dark', 0.66, 0.5, 0.35, T(x, 3.45, zc) @ RX(-90), segs=14)
+        m.cone('p_fire', 0.48, 0.48, 0.05, T(x, 3.27, zc) @ RX(-90), segs=14)
+        m.box('p_orange', x, 7.0, zc + 1.0, 0.25, 2.2, 0.9, RY(-sx * 12))      # freio aerodinâmico
+        m.box('p_cream', x + sx * 0.3, 8.0, zc + 0.05, 0.06, 4.0, 0.25)          # faixa lateral
+        m.box('p_beam', sx * 1.45, 8.0, zc, 0.22, 0.22, 0.22)                    # emissor do raio
+        for dz in (0.35, -0.35):  # cabos até a cabine
+            a = Vector((x - sx * 0.6, 3.9, zc + dz)); b = Vector((sx * 0.45, 0.2, 1.15 + dz * 0.5))
+            dvec = b - a
+            m.cone('p_dark', 0.05, 0.05, dvec.length, T(*((a + b) / 2)) @ align_z(dvec), segs=5)
+    m.box('p_beam', 0, 8.0, zc, 2.7, 0.08, 0.08)                                 # raio de energia entre os motores
+    # cabine
+    m.cone('p_orange', 0.95, 0.55, 3.2, T(0, -1.2, 1.1) @ RX(-90) @ S(1, 0.75, 1), segs=14)
+    m.cone('p_orange', 0.55, 0.05, 0.9, T(0, 0.85, 1.1) @ RX(-90) @ S(1, 0.75, 1), segs=14)
+    m.cone('p_rust', 0.96, 0.96, 0.35, T(0, -2.7, 1.1) @ RX(-90) @ S(1, 0.75, 1), segs=14)
+    for sx in (-1, 1):
+        m.cone('p_orange', 0.42, 0.42, 1.8, T(sx * 1.05, -2.0, 0.85) @ RX(-90), segs=10)
+        m.cone('p_dark', 0.3, 0.3, 0.06, T(sx * 1.05, -2.92, 0.85) @ RX(-90), segs=10)
+    m.sphere('p_dark', 0.62, T(0, -1.0, 1.55) @ S(1, 1.3, 0.55), u=12, v=6)
+    m.sphere('v_helmet', 0.3, T(0, -1.1, 1.85), u=10, v=6)
+    m.box('p_cream', 0, -1.6, 1.62, 0.3, 1.6, 0.06)
+    return m.done()
+
 # ------------------------------------------------------------------ veículo
 def make_faisca(name):
     """Corredor terrestre 'Faísca': cabine central + 2 turbinas laterais. Frente = +Y."""
@@ -600,6 +722,15 @@ def build_all():
     B.append(make_rock_fin('rock_fin', 53))
     B.append(make_butte('butte', 59))
     B.append(make_ridge('ridge_tunnel'))
+    cave_len, cave_w = 680.0, 400.0
+    mj = os.path.normpath(os.path.join(HERE, '..', 'game', 'assets', 'map', 'map.json'))
+    if os.path.exists(mj):
+        import json
+        cave = json.load(open(mj))['cave']
+        cave_len, cave_w = cave['len'], cave.get('w', cave_w)
+    B.append(make_cave_mesa('cave_mesa', cave_len, cave_w))
+    B.append(make_canyon_roof('canyon_roof'))
+    B.append(make_vespa('vespa'))
     return B
 
 def export(objs):
@@ -615,7 +746,7 @@ def export(objs):
 
 def layout(objs):
     """Arruma as peças em duas fileiras no .blend (grandes atrás, pequenas na frente)."""
-    big = ['ridge_tunnel', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
+    big = ['ridge_tunnel', 'cave_mesa', 'canyon_roof', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
     def width(ob): return max(v.co.x for v in ob.data.vertices) - min(v.co.x for v in ob.data.vertices)
     rows = {0: [o for o in objs if o.name not in big], 1: [o for o in objs if o.name in big]}
     for row, items in rows.items():

@@ -1,58 +1,77 @@
 # RACESTARS
 
-Jogo de corrida mobile: sempre para frente, desviando de obstáculos em alta velocidade,
-num mundo alienígena enorme (inspirações: Race the Sun, Oban Star Racers, Avatar).
+Corrida de podracer para telemóvel (Android): **contra o relógio, de A até B**, num deserto
+gigante de 4 × 4 km. Pode ir para onde quiser — cortar caminho, subir dunas, saltar o abismo,
+atravessar a gruta —, mas tem de passar pelos **15 portões em ordem** até à meta.
 
-![Campo aberto](screenshots/01-campo-aberto.png)
+![Largada](screenshots/01-largada.png)
 
-## Instalar no celular (Android)
+## Instalar no telemóvel (Android)
 
-Baixe `RACESTARS.apk` (gerado em `build/`) no telemóvel e toque em **Instalar**
-(se pedir, permita "instalar apps de fontes desconhecidas"). Jogue com o celular deitado.
+Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
+(se pedir, permita "instalar apps de fontes desconhecidas"). Jogue com o telemóvel deitado.
 
-**Controles no celular:** segure o lado esquerdo/direito da tela para desviar (ou arraste o dedo).
-Toque para começar e para recomeçar.
+**Controlos:** segure o lado esquerdo/direito do ecrã para virar (ou arraste o dedo);
+os dois lados ao mesmo tempo = travar. **CÂMARA** troca entre câmara de perseguição e
+primeira pessoa (cabine). **↺** recomeça a corrida.
 
-## Como abrir no PC (para editar)
+## A corrida
 
-1. Baixe o **Godot 4.5** (grátis): https://godotengine.org/download
-2. Abra o Godot → **Importar** → escolha `game/project.godot`.
-3. Aperte **F5** (ou o botão ▶).
+![Mapa](screenshots/00-mapa.png)
 
-**Controles:** `←` `→` ou `A` `D` · no celular/mouse: segure o lado esquerdo/direito da tela, ou arraste.
-`Espaço`/toque para começar e para recomeçar depois de bater.
+Da largada (verde, em baixo à esquerda) até à meta (vermelho, em cima à direita), ~11 km de percurso:
 
-## O que tem na demo
+1. **Deserto aberto** com colunas e arcos de pedra.
+2. **A mesa e a gruta**: a estrada dá a volta à mesa; quem tiver pontaria entra na **gruta** e corta caminho.
+3. **Desfiladeiro** largo com paredões em camadas.
+4. **Campo de arcos** de pedra (passa-se por baixo).
+5. **Abismo**: rampa e vala funda a atravessar a pista — salta-se a 400 km/h (ou contorna-se).
+6. **Dunas** com pequenos saltos.
+7. **Desfiladeiro estreito com teto de pedra** (caverna com luz ao fundo) e **meta**.
 
-- **Mapa infinito** para frente e **infinito para os lados** (gerado em pedaços de 80 × 80 m ao redor do jogador).
-- A cada 1,5 km vem uma **cordilheira com túneis** (um túnel a cada 60 m de largura): ela não acaba para os lados,
-  então é preciso entrar num túnel — e lá dentro não dá para ir para os lados (cristais para desviar).
-- Dois biomas que se alternam: **savana de arenito** (colunas, mesas, arcos, acácias, torres) e
-  **vale dos cristais** (cristais, cogumelos gigantes, portais antigos).
-- Velocidade aumenta com o tempo; bateu, acabou. Recorde salvo no aparelho.
-- **Mapa vasto**: arcos de pedra gigantes (passa-se por baixo), arcos duplos, anéis de pedra,
-  lâminas de rocha e formações enormes no horizonte, além de "avenidas" de arcos em fila.
-- **Sensação de velocidade**: rastros de vento, poeira, rastro das turbinas, borrão nas bordas,
-  câmera que abre e treme com a velocidade, e um "zum" + vibração ao passar rente a um obstáculo.
-- **Som**: motor que sobe com a velocidade, vento, música, eco dentro dos túneis e batida.
-- Qualidade se ajusta sozinha se o celular não aguentar (desliga borrão e depois sombras).
-- Sem poderes: só correr e desviar.
+- Fora da estrada vale tudo: o mapa inteiro é livre (montanhas nas bordas).
+- Coluna de luz azul = próximo portão; seta no topo e minimapa ajudam a não perder o rumo.
+- Raspar nas paredes faz perder velocidade; bater de frente (ou cair no abismo) volta ao último portão.
+- O melhor tempo fica guardado no aparelho.
+
+| | |
+|---|---|
+| ![Volta da mesa](screenshots/02-volta-da-mesa.png) | ![Gruta](screenshots/03-gruta-atalho.png) |
+| ![Dentro da gruta](screenshots/04-dentro-da-gruta.png) | ![Desfiladeiro](screenshots/05-desfiladeiro.png) |
+| ![Abismo](screenshots/06-salto-do-abismo.png) | ![Caverna final](screenshots/07-caverna-final.png) |
+
+![Primeira pessoa](screenshots/08-primeira-pessoa.png)
+
+**Sensação de velocidade:** até 450 km/h, riscos de vento, poeira levantada, chamas das turbinas,
+borrão nas bordas, câmara que abre e treme com a velocidade.
+**Som:** turbinas que rugem e sobem de tom, vento, música, contagem 3-2-1, sinal nos portões,
+fanfarra na chegada, raspões, batidas e eco dentro da gruta.
 
 ## Estrutura
 
-| Pasta | O quê |
+| Pasta / ficheiro | O quê |
 |-------|-------|
-| `game/` | Projeto Godot 4.5 (renderizador Compatibility, pensado para celular) |
-| `game/scripts/world.gd` | Gera o mapa infinito, biomas, cordilheiras e túneis |
-| `game/scripts/player.gd` | Veículo, controles (teclado/toque) e piloto automático de teste |
-| `game/shaders/` | Céu pintado (sol, nuvens, planeta, cordilheiras distantes) e chão |
-| `game/assets/models/` | Peças exportadas do Blender (`.glb`) |
-| `blender/build_assets.py` | Script que **modela no Blender** todas as peças e o veículo, com cores |
+| `tools/make_map.py` | **Gera o mapa**: alturas do terreno, percurso, portões, mesa da gruta, abismo, posição das rochas e minimapa |
+| `blender/build_assets.py` | **Modela no Blender** todas as peças (rochas, arcos, mesa com gruta, teto da caverna, o podracer "Vespa"), com cores |
 | `blender/racestars_assets.blend` | As peças lado a lado para abrir/editar no Blender (5.0+) |
-| `concept/` | Arte conceitual |
-| `screenshots/` | Prints da demo |
+| `tools/make_sounds.py` | Sintetiza todos os sons e a música |
+| `game/` | Projeto Godot 4.5 (renderizador Compatibility, pensado para telemóvel) |
+| `game/scripts/race.gd` | Corrida: contagem, cronómetro, portões, recorde, voltar ao último portão |
+| `game/scripts/terrain.gd` | Terreno 4 × 4 km em pedaços com níveis de detalhe |
+| `game/scripts/map.gd` | Coloca as peças do Blender, a gruta, o teto, os portões e as balizas |
+| `game/scripts/podracer.gd` | Física do podracer (flutua, derrapa, salta) e controlos de toque |
+| `game/scripts/camera_rig.gd` | Câmara de perseguição e primeira pessoa |
+| `game/scripts/hud.gd` | Cronómetro, portões, minimapa, seta, botões |
+| `game/shaders/` | Céu do deserto, areia/rocha em camadas do terreno e das rochas, borrão de velocidade |
 
-![Peças modeladas no Blender](screenshots/00-pecas-blender.png)
+## Gerar tudo de novo
+
+```bash
+pip install numpy scipy pillow bpy==5.0.1
+python tools/make_map.py              # mapa (game/assets/map/)
+python blender/build_assets.py        # peças .glb (lê o tamanho da gruta de map.json)
+python tools/make_sounds.py           # sons
+```
 
 ## Gerar o APK
 
@@ -61,23 +80,12 @@ godot --headless --path game --export-release "Android" ../build/RACESTARS-unsig
 java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2/v3)
 ```
 
-Os sons são sintetizados por `tools/make_sounds.py` (precisa de numpy).
-
-## Regerar as peças do Blender
-
-```bash
-blender -b -P blender/build_assets.py -- --preview     # com Blender 5.0+ instalado
-# ou
-pip install bpy==5.0.1 && python blender/build_assets.py --preview
-```
-
-Depois abra o projeto no Godot (ele reimporta os `.glb` sozinho).
-
 ## Testes automáticos (opcional)
 
 ```bash
-godot --path game -- --autoplay --seed=2 --shots=3,8 --shotdir=/tmp/prints --quit=10
+# piloto automático do início ao fim, com registo e capturas de ecrã
+godot --path game -- --autoplay --log --shots=5,20,45 --shotdir=/tmp/prints --quit=110
+# começar no portão N, ou num ponto qualquer (x,z,direção) e em primeira pessoa
+godot --path game -- --autoplay --cp=11
+godot --path game -- --at=-700,1150,1,0 --fpv
 ```
-
-`--autoplay` liga o piloto automático, `--start=1150` começa perto da primeira cordilheira,
-`--shots` tira prints nos segundos indicados.
