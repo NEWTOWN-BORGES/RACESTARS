@@ -1,4 +1,4 @@
-// Material das rochas, arcos, mesas e da gruta.
+// Material das rochas, arcos, pontes, túneis e ruínas: estratos com a cor do bioma.
 shader_type spatial;
 render_mode specular_disabled;
 #include "res://shaders/rock_common.gdshaderinc"
@@ -13,6 +13,6 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = strata(wpos, wnrm) * darken;
+	ALBEDO = strata(wpos, wnrm, biome_at(wpos.xz)) * darken;
 	ROUGHNESS = 1.0;
 }

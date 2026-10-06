@@ -140,6 +140,13 @@ def scrape():
     e = np.minimum(1, t / 0.01) * np.exp(-t / 0.16)
     return (nz / np.std(nz) + fft_filter(grit, band(1000, 8000)) + ring) * e
 
+def land():
+    """Aterragem de um salto: baque grave + areia/cascalho."""
+    t = t_axis(0.7); n = len(t)
+    thump = np.sin(2 * np.pi * np.cumsum(np.interp(t, [0, 0.25], [90, 38])) / SR) * np.exp(-t / 0.16)
+    grit = fft_filter(rng.standard_normal(n), band(400, 5000)); grit = grit / np.std(grit) * np.exp(-t / 0.12)
+    return thump + grit * 0.35
+
 # ---------------------------------------------------------------- música (loop 8 compassos, 100 bpm)
 def note(n):  # MIDI -> Hz
     return 440.0 * 2 ** ((n - 69) / 12)
@@ -198,6 +205,7 @@ if __name__ == '__main__':
     save('checkpoint', checkpoint(), 0.75)
     save('finish', finish(), 0.85)
     save('scrape', scrape(), 0.8)
+    save('land', land(), 0.85)
     save('wind_loop', wind(), 0.8)
     save('whoosh', whoosh(), 0.9)
     save('crash', crash(), 0.95)

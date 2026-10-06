@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dxihq3jud4imm"
-path="res://.godot/imported/cave_mesa.glb-6d9425219170c40c7a51933497f5bf06.scn"
+uid="uid://c2d1caejqfq5f"
+path="res://.godot/imported/tunel_f1.glb-e3097f85603843b91a643cff77f3cc0f.scn"
 
 [deps]
 
-source_file="res://assets/models/cave_mesa.glb"
-dest_files=["res://.godot/imported/cave_mesa.glb-6d9425219170c40c7a51933497f5bf06.scn"]
+source_file="res://assets/models/tunel_f1.glb"
+dest_files=["res://.godot/imported/tunel_f1.glb-e3097f85603843b91a643cff77f3cc0f.scn"]
 
 [params]
 

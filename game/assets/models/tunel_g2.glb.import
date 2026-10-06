@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cyoqq1sqwqqux"
-path="res://.godot/imported/ridge_tunnel.glb-ef2d1e751d2d3762696673f34c271faa.scn"
+uid="uid://dbr5ppcvc8hxl"
+path="res://.godot/imported/tunel_g2.glb-68ea79fabf99721651dc0ef0e4bae843.scn"
 
 [deps]
 
-source_file="res://assets/models/ridge_tunnel.glb"
-dest_files=["res://.godot/imported/ridge_tunnel.glb-ef2d1e751d2d3762696673f34c271faa.scn"]
+source_file="res://assets/models/tunel_g2.glb"
+dest_files=["res://.godot/imported/tunel_g2.glb-68ea79fabf99721651dc0ef0e4bae843.scn"]
 
 [params]
 

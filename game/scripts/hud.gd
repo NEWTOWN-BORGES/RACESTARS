@@ -24,6 +24,9 @@ var player_heading := 0.0
 var next_cp := Vector2.ZERO
 var arrow_angle := 0.0
 var show_arrow := false
+var player: Node            # para acender os botões de toque quando premidos
+var pads: Control
+var paths_drawn := false
 
 func _ready() -> void:
 	var fv := FontVariation.new()
@@ -37,7 +40,7 @@ func _ready() -> void:
 	time_label = _label(font_title, 54, 0.0, 1.0, 0.0, HORIZONTAL_ALIGNMENT_CENTER, 10)
 	cp_label = _label(font_title, 28, 0.0, 1.0, 0.0, HORIZONTAL_ALIGNMENT_LEFT, 22)
 	best_label = _label(font_body, 22, 0.0, 1.0, 0.0, HORIZONTAL_ALIGNMENT_RIGHT, 24)
-	speed_label = _label(font_title, 44, 0.0, 1.0, 1.0, HORIZONTAL_ALIGNMENT_RIGHT, 22)
+	speed_label = _label(font_title, 44, 0.0, 1.0, 1.0, HORIZONTAL_ALIGNMENT_RIGHT, 232)
 	center_label = _label(font_title, 110, 0.0, 1.0, 0.5, HORIZONTAL_ALIGNMENT_CENTER, -90)
 	sub_label = _label(font_body, 30, 0.0, 1.0, 0.5, HORIZONTAL_ALIGNMENT_CENTER, 40)
 	hint_label = _label(font_body, 22, 0.0, 1.0, 0.5, HORIZONTAL_ALIGNMENT_CENTER, 92)
@@ -50,12 +53,16 @@ func _ready() -> void:
 	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	arrow.draw.connect(_draw_arrow)
 	root.add_child(arrow)
+	# botões de toque desenhados (só desenho: o toque é lido pelo veículo)
+	pads = Control.new()
+	pads.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pads.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pads.draw.connect(_draw_pads)
+	root.add_child(pads)
 	# minimapa
 	minimap = Control.new()
-	minimap.anchor_top = 1.0
-	minimap.anchor_bottom = 1.0
-	minimap.position = Vector2(18, -228)
-	minimap.size = Vector2(210, 210)
+	minimap.position = Vector2(22, 72)
+	minimap.size = Vector2(200, 200)
 	minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	minimap.draw.connect(_draw_minimap)
 	root.add_child(minimap)
@@ -146,6 +153,29 @@ func set_nav(ppos: Vector3, heading: float, target: Vector3) -> void:
 	show_arrow = absf(arrow_angle) > 0.45
 	arrow.queue_redraw()
 	minimap.queue_redraw()
+	pads.queue_redraw()
+
+func _pad(c: Vector2, r: float, on: bool, text: String, col: Color) -> void:
+	pads.draw_circle(c, r, Color(col, 0.42 if on else 0.16))
+	pads.draw_arc(c, r, 0.0, TAU, 48, Color(1, 1, 1, 0.85 if on else 0.45), 4.0, true)
+	if text == "<" or text == ">":   # seta desenhada (não depende da fonte ter o símbolo)
+		var d := -1.0 if text == "<" else 1.0
+		var tri := PackedVector2Array([c + Vector2(30 * d, 0), c + Vector2(-18 * d, -28), c + Vector2(-18 * d, 28)])
+		pads.draw_colored_polygon(tri, Color(1, 1, 1, 0.95 if on else 0.7))
+		return
+	var fs := 24
+	var w := font_title.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	pads.draw_string_outline(font_title, c + Vector2(-w * 0.5, fs * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 6, Color(0.1, 0.05, 0.02, 0.8))
+	pads.draw_string(font_title, c + Vector2(-w * 0.5, fs * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.95 if on else 0.7))
+
+func _draw_pads() -> void:
+	var s := pads.size
+	var l: bool = player != null and player.input_left
+	var r: bool = player != null and player.input_right
+	var b: bool = player != null and player.braking and player.running
+	_pad(Vector2(s.x * 0.09, s.y - 110), 72.0, l, "<", Color("#7ff6ff"))
+	_pad(Vector2(s.x * 0.27, s.y - 110), 72.0, r, ">", Color("#7ff6ff"))
+	_pad(Vector2(s.x - 150, s.y - 125), 92.0, b, "TRAVÃO", Color("#ff5a3c"))
 
 func _draw_arrow() -> void:
 	if not show_arrow:

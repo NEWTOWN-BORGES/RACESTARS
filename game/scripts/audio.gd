@@ -27,7 +27,7 @@ func _ready() -> void:
 		AudioServer.add_bus_effect(fx_bus, r)
 	reverb = AudioServer.get_bus_effect(fx_bus, 0)
 	reverb.wet = 0.0
-	for n in ["whoosh", "crash", "start", "beep", "go", "checkpoint", "finish", "scrape"]:
+	for n in ["whoosh", "crash", "start", "beep", "go", "checkpoint", "finish", "scrape", "land"]:
 		S[n] = load("res://assets/audio/%s.wav" % n)
 	engine = _player(_loop(preload("res://assets/audio/engine_loop.wav")), -14.0, "Efeitos")
 	wind = _player(_loop(preload("res://assets/audio/wind_loop.wav")), -40.0, "Efeitos")
@@ -87,6 +87,9 @@ func scrape(strength: float) -> void:
 		return
 	_scrape_cd = 0.18
 	_play("scrape", randf_range(0.85, 1.15), lerpf(-10.0, 0.0, clampf(strength / 40.0, 0.0, 1.0)))
+
+func land(strength: float) -> void:
+	_play("land", randf_range(0.9, 1.1), lerpf(-10.0, 0.0, clampf(strength / 30.0, 0.0, 1.0)))
 
 func near_miss(frac: float) -> void:
 	_play("whoosh", randf_range(0.9, 1.15) + frac * 0.3, -2.0)

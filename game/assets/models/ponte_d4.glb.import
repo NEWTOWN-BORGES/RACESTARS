@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bn8xfys1ge6yn"
-path="res://.godot/imported/faisca.glb-dfaea7385abba22287ab1784abf9868b.scn"
+uid="uid://bbk4q078lugw1"
+path="res://.godot/imported/ponte_d4.glb-f21bbf9aa92dcc812af4a321f2d1216d.scn"
 
 [deps]
 
-source_file="res://assets/models/faisca.glb"
-dest_files=["res://.godot/imported/faisca.glb-dfaea7385abba22287ab1784abf9868b.scn"]
+source_file="res://assets/models/ponte_d4.glb"
+dest_files=["res://.godot/imported/ponte_d4.glb-f21bbf9aa92dcc812af4a321f2d1216d.scn"]
 
 [params]
 

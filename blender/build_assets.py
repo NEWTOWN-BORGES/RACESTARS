@@ -691,13 +691,188 @@ def make_faisca(name):
         m.box('v_white', x + sx * 0.82, -1.5, zc + 1.44, 0.12, 0.7, 0.08)
     return m.done()
 
+
+# ------------------------------------------------------------------ peças do mapa grande (túneis, pontes, aqueduto, ruínas)
+def make_tunnel(name, L, Hl, W=84.0):
+    """Bloco de túnel: tampa plana a Hl (por cima passa-se de carro), túnel de 36 m de largura por baixo.
+    Chão aberto em z=0 (o chão é o terreno), ao longo de +Y desde a origem."""
+    m = Mesh(name)
+    THW, TWALL, TARCH = 18.0, 11.0, 7.0
+    BOT = -3.0
+    def top(x, y): return Hl + 0.4 * noise.noise(Vector((x * 0.05, y * 0.05, 1.3)))
+    def atop(x): return TWALL + TARCH * math.sqrt(max(0.0, 1 - (x / THW) ** 2))
+    def band(z): return BANDS[int((z + 40) / 6.5) % 4]
+    n_y = max(8, int(L / 12)); ys = [i * L / n_y for i in range(n_y + 1)]
+    us = [i / 10.0 - 1 for i in range(21)]
+    grid = [[m.bm.verts.new((u * W / 2, y, top(u * W / 2, y))) for u in us] for y in ys]
+    for j in range(len(ys) - 1):
+        for i in range(len(us) - 1):
+            f = m.bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i])); f.normal_update()
+            if f.normal.z < 0: f.normal_flip()
+            f.material_index = m.mi('moss')
+    for sx in (-1, 1):  # paredes de fora (ficam enterradas no terreno)
+        for y0, y1 in zip(ys, ys[1:]):
+            x = sx * W / 2
+            m.face('rock_dark', [(x, y0, BOT), (x, y1, BOT), (x, y1, top(x, y1)), (x, y0, top(x, y0))], want=(sx, 0, 0))
+    ts = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    for yf, sg in ((0.0, -1), (L, 1)):  # bocas do túnel
+        cols_l = [-W / 2 + (W / 2 - THW) * i / 6 for i in range(7)]
+        cols_in = [-THW + i * 1.5 for i in range(25)]
+        cols_r = [THW + (W / 2 - THW) * i / 6 for i in range(7)]
+        for group, zb in ((cols_l, lambda x: BOT), (cols_in, atop), (cols_r, lambda x: BOT)):
+            for a, b in zip(group, group[1:]):
+                Ha, Hb = top(a, yf), top(b, yf)
+                for t0, t1 in zip(ts, ts[1:]):
+                    za0, za1 = lerp(zb(a), Ha, t0), lerp(zb(a), Ha, t1); zb0, zb1 = lerp(zb(b), Hb, t0), lerp(zb(b), Hb, t1)
+                    m.face(band((za0 + za1 + zb0 + zb1) / 4), [(a, yf, za0), (b, yf, zb0), (b, yf, zb1), (a, yf, za1)], want=(0, sg, 0))
+        # moldura de pedra clara à volta da boca
+        for a, b in zip(cols_in, cols_in[1:]):
+            za, zb_ = atop(a), atop(b)
+            m.face('cream', [(a, yf + sg * 0.6, za), (b, yf + sg * 0.6, zb_), (b, yf + sg * 0.6, zb_ + 2.2), (a, yf + sg * 0.6, za + 2.2)], want=(0, sg, 0))
+    sec = [(-THW, -1.0), (-THW, TWALL)] + [(x, atop(x)) for x in [-THW + i * 1.5 for i in range(1, 24)]] + [(THW, TWALL), (THW, -1.0)]
+    for y0, y1 in zip(ys, ys[1:]):  # interior
+        for (xa, za), (xb, zb_) in zip(sec, sec[1:]):
+            cx, cz = (xa + xb) / 2, (za + zb_) / 2
+            jit = lambda x, z, y: Vector((0.7 * noise.noise(Vector((x * 0.2, y * 0.05, z * 0.2))), 0, 0.5 * noise.noise(Vector((z * 0.2, y * 0.05, x * 0.2)))))
+            pa = Vector((xa, y0, za)) + jit(xa, za, y0); pb = Vector((xb, y0, zb_)) + jit(xb, zb_, y0)
+            pc = Vector((xb, y1, zb_)) + jit(xb, zb_, y1); pd = Vector((xa, y1, za)) + jit(xa, za, y1)
+            m.face('rock_dark', [pa, pb, pc, pd], want=(-cx, 0, 5.0 - cz))
+    return m.done()
+
+def make_bridge(name, L, W=30.0, broken=0.0, seed=3, deep=46.0):
+    """Ponte natural de pedra: tabuleiro plano em z=0 (passa-se por cima), arco por baixo,
+    pilares nas pontas que descem para dentro das paredes. Ao longo de +Y desde a origem.
+    broken > 0: falta um troço no meio (salto!)."""
+    m = Mesh(name)
+    def under(y):
+        t = y / L
+        return -4.0 - deep * (1 - math.sin(math.pi * t)) ** 1.6
+    def band(z): return BANDS[int((z + 60) / 5.0) % 4]
+    def piece(y0, y1, jag0, jag1):
+        n = max(4, int((y1 - y0) / 4)); ys = [y0 + (y1 - y0) * i / n for i in range(n + 1)]
+        rings = []
+        for k, y in enumerate(ys):
+            wob = 1.2 * noise.noise(Vector((y * 0.07, seed, 0.3)))
+            wt = W / 2 + wob; wb = W / 2 * 0.86 + wob
+            zt = 0.0; zb = under(y) + 0.8 * noise.noise(Vector((y * 0.1, seed, 1.7)))
+            if (k == 0 and jag0) or (k == len(ys) - 1 and jag1):
+                zt -= 1.5
+            rings.append([m.bm.verts.new((-wt, y, zt)), m.bm.verts.new((wt, y, zt)),
+                          m.bm.verts.new((wb, y, zb)), m.bm.verts.new((-wb, y, zb))])
+        for r0, r1 in zip(rings, rings[1:]):
+            yc = (r0[0].co.y + r1[0].co.y) / 2
+            for k in range(4):
+                f = m.bm.faces.new((r0[k], r0[(k + 1) % 4], r1[(k + 1) % 4], r1[k]))
+                f.normal_update(); zc = f.calc_center_median().z
+                f.material_index = m.mi('moss' if (k == 0 and zc > -0.5) else band(zc))
+        for r, want in ((rings[0], (0, -1, 0)), (rings[-1], (0, 1, 0))):
+            f = m.bm.faces.new(r); f.normal_update()
+            if f.normal.dot(Vector(want)) < 0: f.normal_flip()
+            f.material_index = m.mi('rust')
+    if broken > 0:
+        piece(0.0, L / 2 - broken / 2, False, True)
+        piece(L / 2 + broken / 2, L, True, False)
+    else:
+        piece(0.0, L, False, False)
+    bmesh.ops.recalc_face_normals(m.bm, faces=list(m.bm.faces))
+    return m.done()
+
+def make_aqueduct_seg(name, seg=40.0, deck=20.0, W=20.0):
+    """Troço de aqueduto (como nas imagens): pilares, arco e tabuleiro por cima (passa-se por cima)."""
+    m = Mesh(name)
+    for y in (1.6, seg - 1.6):  # pilares
+        m.box('cream', 0, y, (deck - 3 - 12) / 2, W * 0.8, 3.2, deck - 3 + 12)
+        m.box('cream_dark', 0, y, -11.5 + 0.8, W * 0.9, 4.4, 1.6)
+    m.box('cream', 0, seg / 2, deck - 1.6, W, seg, 3.2)          # tabuleiro
+    for sx in (-1, 1):                                           # muretes baixos
+        m.box('cream_dark', sx * (W / 2 - 0.4), seg / 2, deck + 0.35, 0.8, seg, 0.7)
+    m.box('orange_band', 0, seg / 2, deck - 3.6, W * 0.82, seg, 0.8)  # friso
+    path, norms = [], []
+    R = seg / 2 - 3.2; base = deck - 3.4 - R * 0.95
+    for k in range(17):  # arco entre os pilares
+        a = math.pi * (1 - k / 16)
+        path.append(Vector((0, 0, 0)))
+        path[-1] = Vector((R * math.cos(a) + seg / 2, 0, base + R * 0.95 * math.sin(a)))
+        norms.append(Vector((math.cos(a), 0, math.sin(a) * 0.95)).normalized())
+    before = set(m.bm.verts)
+    m.sweep('cream', path, norms, 2.6, -W * 0.4, W * 0.4)
+    new = [v for v in m.bm.verts if v not in before]
+    for v in new:  # a varredura é no plano XZ: roda para o plano YZ
+        v.co = Vector((v.co.y, v.co.x, v.co.z))
+    bmesh.ops.recalc_face_normals(m.bm, faces=list({f for v in new for f in v.link_faces}))
+    allv = list(m.bm.verts)
+    m.jitter(allv, 0.15, 0.4, 5.0, radial=False)
+    return m.done()
+
+def make_ruin_column(name, seed):
+    """Coluna antiga partida, com musgo."""
+    rnd = random.Random(seed); m = Mesh(name)
+    m.box('cream_dark', 0, 0, 0.6, 4.4, 4.4, 1.2)
+    m.cone('cream', 1.7, 1.75, 0.8, T(0, 0, 1.6), segs=12)
+    h = rnd.uniform(9, 14)
+    vs = m.cone('cream', 1.45, 1.3, h, T(0, 0, 2.0 + h / 2), segs=12)
+    m.jitter([v for v in vs if v.co.z > h], 1.2, 0.8, seed, radial=False)
+    m.cone('orange_band', 1.48, 1.48, 0.5, T(0, 0, 2.0 + h * 0.3), segs=12, caps=False)
+    m.cone('moss', 1.6, 1.2, 0.6, T(0, 0, 2.0 + h - 0.1), segs=10)
+    for k in range(2):  # pedaços caídos
+        r = rnd.uniform(0.9, 1.3); a = rnd.uniform(0, math.tau)
+        m.cone('cream', r, r, rnd.uniform(1.6, 2.6), T(math.cos(a) * 4, math.sin(a) * 4, r * 0.8) @ RX(90) @ RZ(rnd.uniform(0, 90)), segs=10)
+    return m.done()
+
+def make_ruin_wall(name, seed):
+    """Muro em ruínas com uma porta em arco (como as construções das imagens)."""
+    rnd = random.Random(seed); m = Mesh(name)
+    Lw, Tk, Hw = 18.0, 2.6, 11.0
+    door_hw, door_h = 3.2, 7.0
+    cols = [-Lw / 2 + i * Lw / 18 for i in range(19)]
+    def top_h(x): return Hw - (abs(x) > 4) * rnd.uniform(0, 3.5) - max(0.0, x - 3) * 0.5
+    tops = [top_h(x) for x in cols]
+    for (xa, ha), (xb, hb) in zip(zip(cols, tops), zip(cols[1:], tops[1:])):
+        xc = (xa + xb) / 2
+        def zb(x):
+            if abs(x) < door_hw:
+                return door_h - door_hw + math.sqrt(max(0.0, door_hw ** 2 - x * x))
+            return 0.0
+        for sy in (-1, 1):
+            m.face('cream', [(xa, sy * Tk / 2, zb(xa)), (xb, sy * Tk / 2, zb(xb)), (xb, sy * Tk / 2, hb), (xa, sy * Tk / 2, ha)], want=(0, sy, 0))
+        m.face('moss', [(xa, -Tk / 2, ha), (xb, -Tk / 2, hb), (xb, Tk / 2, hb), (xa, Tk / 2, ha)], want=(0, 0, 1))
+        if abs(xc) < door_hw:
+            m.face('cream_dark', [(xa, -Tk / 2, zb(xa)), (xb, -Tk / 2, zb(xb)), (xb, Tk / 2, zb(xb)), (xa, Tk / 2, zb(xa))], want=(0, 0, -1))
+    for sx, x in ((-1, cols[0]), (1, cols[-1])):
+        h = tops[0] if sx < 0 else tops[-1]
+        m.face('cream_dark', [(x, -Tk / 2, 0), (x, Tk / 2, 0), (x, Tk / 2, h), (x, -Tk / 2, h)], want=(sx, 0, 0))
+    for x in (-door_hw - 0.4, door_hw + 0.4):
+        m.box('orange_band', x, 0, door_h * 0.5, 0.6, Tk + 0.3, door_h)
+    m.box('cream_dark', 0, 0, 0.4, Lw + 1, Tk + 1.2, 0.8)
+    return m.done()
+
+def make_ruin_tower(name, seed):
+    """Torre antiga alta e estreita (marco na paisagem, como a das imagens)."""
+    rnd = random.Random(seed); m = Mesh(name)
+    z = 0.0; r = 10.0
+    tiers = [(14, 10.0), (12, 8.6), (11, 7.4), (10, 6.6), (9, 5.6), (7, 4.6)]
+    for i, (h, rr) in enumerate(tiers):
+        m.cone('cream' if i % 2 == 0 else 'sand_light', rr, rr * 0.94, h, T(0, 0, z + h / 2) @ RZ(i * 13), segs=12)
+        m.cone('orange_band', rr * 1.04, rr * 1.04, 0.9, T(0, 0, z + h - 0.45), segs=12, caps=False)
+        for k in range(4):  # janelas em arco
+            a = math.radians(k * 90 + i * 20)
+            p = Vector((math.cos(a) * rr * 0.96, math.sin(a) * rr * 0.96, z + h * 0.55))
+            m.box('window', p.x, p.y, p.z, 1.6, 1.6, h * 0.35, RZ(math.degrees(a)))
+        z += h
+    vs = m.cone('cream', 4.6, 2.0, 6.0, T(0, 0, z + 3.0), segs=12)
+    m.jitter([v for v in vs if v.co.z > z + 1], 1.4, 0.5, seed, radial=False)
+    m.sphere('moss', 5.0, T(-2, 1, z + 1.5) @ S(1, 1, 0.5), u=10, v=6)
+    for k in range(5):  # trepadeiras de musgo
+        a = rnd.uniform(0, math.tau); zz = rnd.uniform(8, z - 8)
+        m.sphere('moss_dark', rnd.uniform(1.5, 2.6), T(math.cos(a) * 8.5, math.sin(a) * 8.5, zz) @ S(1, 1, 1.6), u=8, v=6)
+    return m.done()
+
 # ------------------------------------------------------------------ montagem
 def build_all():
     global COLL
     bpy.ops.wm.read_factory_settings(use_empty=True)
     COLL = bpy.data.collections.new('RACESTARS'); bpy.context.scene.collection.children.link(COLL)
     B = []
-    B.append(make_faisca('faisca'))
     B.append(make_spire('rock_spire_a', 11, 6.0, 30.0, 4))
     B.append(make_spire('rock_spire_b', 23, 4.5, 22.0, 3, lean=0.04))
     B.append(make_spire('rock_spire_c', 37, 7.5, 40.0, 5, lean=-0.02))
@@ -715,20 +890,23 @@ def build_all():
     B.append(make_tower('tower_pod', 6))
     B.append(make_float_island('float_island', 15))
     B.append(make_grass('grass_tuft', 1))
-    B.append(make_pebbles('pebbles', 2))
     B.append(make_arch_giant('arch_giant', 41))
     B.append(make_arch_twin('arch_twin', 43))
     B.append(make_rock_ring('rock_ring', 47))
     B.append(make_rock_fin('rock_fin', 53))
     B.append(make_butte('butte', 59))
-    B.append(make_ridge('ridge_tunnel'))
-    cave_len, cave_w = 680.0, 400.0
+    B.append(make_ruin_column('ruin_column', 61))
+    B.append(make_ruin_wall('ruin_wall', 67))
+    B.append(make_ruin_tower('ruin_tower', 71))
+    B.append(make_aqueduct_seg('aqueduct_seg'))
     mj = os.path.normpath(os.path.join(HERE, '..', 'game', 'assets', 'map', 'map.json'))
-    if os.path.exists(mj):
+    if os.path.exists(mj):  # túneis e pontes feitos à medida do mapa
         import json
-        cave = json.load(open(mj))['cave']
-        cave_len, cave_w = cave['len'], cave.get('w', cave_w)
-    B.append(make_cave_mesa('cave_mesa', cave_len, cave_w))
+        info = json.load(open(mj))
+        for t in info['tunnels']:
+            B.append(make_tunnel(t['name'], t['len'], t['height']))
+        for k, b in enumerate(info['bridges']):
+            B.append(make_bridge(b['name'], b['len'], b['width'], b['broken'], seed=k + 3, deep=b.get('deep', 46.0)))
     B.append(make_canyon_roof('canyon_roof'))
     B.append(make_vespa('vespa'))
     return B
@@ -746,9 +924,10 @@ def export(objs):
 
 def layout(objs):
     """Arruma as peças em duas fileiras no .blend (grandes atrás, pequenas na frente)."""
-    big = ['ridge_tunnel', 'cave_mesa', 'canyon_roof', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
+    big = ['canyon_roof', 'ruin_tower', 'aqueduct_seg', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
     def width(ob): return max(v.co.x for v in ob.data.vertices) - min(v.co.x for v in ob.data.vertices)
-    rows = {0: [o for o in objs if o.name not in big], 1: [o for o in objs if o.name in big]}
+    isbig = lambda o: o.name in big or o.name.startswith(('tunel', 'ponte'))
+    rows = {0: [o for o in objs if not isbig(o)], 1: [o for o in objs if isbig(o)]}
     for row, items in rows.items():
         x = 0.0; y = 0.0 if row == 0 else 110.0
         for ob in items:

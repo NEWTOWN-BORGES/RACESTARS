@@ -47,18 +47,20 @@ func _ready() -> void:
 	sun.global_transform = Transform3D(Basis.looking_at(-to_sun, Vector3.UP), Vector3.ZERO)
 	info = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map/map.json"))
 	terrain.setup(info)
-	terrain.focus = player
+	terrain.focus = cam
 	map.player = player
 	map.setup(info, terrain)
 	map.checkpoint_passed.connect(_on_checkpoint)
 	map.finish_passed.connect(_on_finish)
 	hud.map_size = float(info.size)
+	hud.player = player
 	hud.camera_pressed.connect(func(): cam.toggle())
 	hud.restart_pressed.connect(func(): get_tree().reload_current_scene())
-	player.route = info.route
+	player.set_route(_build_route())
 	player.autopilot = args.has("autoplay")
 	player.crashed.connect(_on_crash)
 	player.scraped.connect(_on_scrape)
+	player.landed.connect(_on_land)
 	var st: Dictionary = info.start
 	if args.has("cp"):
 		next_cp = int(args["cp"])
@@ -69,7 +71,7 @@ func _ready() -> void:
 	if args.has("at"):   # teste: --at=x,z,dx,dz coloca o veículo em qualquer ponto do mapa
 		var a := String(args["at"]).split(",")
 		var ap := Vector3(float(a[0]), 0.0, float(a[1]))
-		ap.y = terrain.height_at(ap.x, ap.z)
+		ap.y = terrain.height_at(ap.x, ap.z) if a.size() < 5 else float(a[4])
 		player.place(ap, Vector2(float(a[2]), float(a[3])).normalized(), 0.0)
 	terrain.update_now()
 	cam.player = player
@@ -82,13 +84,32 @@ func _ready() -> void:
 	add_child(audio)
 	best = _load_best()
 	map.highlight(next_cp)
-	hud.set_center("", "", "Segure os lados da tela para virar  ·  os dois lados = travar")
+	map.warmup(cam)
+	hud.set_center("", "", "Esquerda do ecrã: virar   ·   direita: TRAVÃO (trave antes das curvas apertadas)")
 	if args.has("shots"):
 		for s in String(args["shots"]).split(","):
 			shots.append(float(s))
 
+## Rota do piloto automático (testes): escolhe um caminho por trecho com --variant=N
+## (N-ésimo caminho de cada trecho; se não existir usa o primeiro) ou --variant=sorte.
+func _build_route() -> Array:
+	var out: Array = []
+	var v = args.get("variant", "0")
+	for sec in info.sections:
+		var vs: Array = sec.variants
+		var k := 0
+		if String(v) == "sorte":
+			k = randi() % vs.size()
+		elif int(v) < vs.size():
+			k = int(v)
+		if args.has("log"):
+			print("trecho ", sec.key, ": ", vs[k].name)
+		var r: Array = vs[k].route
+		out.append_array(r if out.is_empty() else r.slice(1))   # o 1.º ponto repete o portão
+	return out
+
 func _setup_input() -> void:
-	var binds := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D], "brake": [KEY_DOWN, KEY_S]}
+	var binds := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D], "brake": [KEY_DOWN, KEY_S, KEY_SPACE]}
 	for action in binds:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.2)
@@ -117,12 +138,12 @@ func _process(dt: float) -> void:
 			var n := int(ceil(t_count - 0.6))
 			if n != _last_count and n >= 1 and n <= 3:
 				_last_count = n
-				hud.set_center(str(n), "", "Segure os lados da tela para virar  ·  os dois lados = travar")
+				hud.set_center(str(n), "", "Esquerda do ecrã: virar   ·   direita: TRAVÃO (trave antes das curvas apertadas)")
 				audio.beep(false)
 			if t_count <= 0.6 and state == State.COUNTDOWN:
 				state = State.RACE
 				player.running = true
-				hud.set_center("JÁ!")
+				hud.set_center("JÁ!", info.sections[0].title)
 				audio.beep(true)
 				audio.start_run()
 		State.RACE:
@@ -137,6 +158,7 @@ func _process(dt: float) -> void:
 				if respawn_timer < 0.0:
 					_respawn()
 			_adapt_quality(dt)
+			_check_stuck(dt)
 	var target := _next_target()
 	hud.set_nav(p, player.heading, target)
 	hud.set_race(t_race, best, next_cp, info.checkpoints.size(), player.speed() * 3.6)
@@ -170,7 +192,8 @@ func _on_checkpoint(i: int) -> void:
 	next_cp += 1
 	map.highlight(next_cp)
 	audio.checkpoint()
-	hud.set_center("", "PORTÃO %d  ·  %s" % [i + 1, hud.fmt_time(t_race)])
+	var zone: String = info.sections[mini(i + 1, info.sections.size() - 1)].title
+	hud.set_center("", "PORTÃO %d  ·  %s" % [i + 1, hud.fmt_time(t_race)], zone)
 	get_tree().create_timer(1.4).timeout.connect(func():
 		if state == State.RACE and respawn_timer < 0.0:
 			hud.set_center(""))
@@ -181,7 +204,8 @@ func _on_finish() -> void:
 	state = State.FINISHED
 	player.running = false
 	var record := best <= 0.0 or t_race < best
-	if record:
+	var counts := not (args.has("cp") or args.has("at") or args.has("autoplay"))   # testes não contam para o recorde
+	if record and counts:
 		best = t_race
 		_save_best()
 	audio.finish()
@@ -217,12 +241,33 @@ func _respawn() -> void:
 	audio.start_run()
 	hud.set_center("")
 
+func _on_land(strength: float) -> void:
+	audio.land(strength)
+	cam.kick(clampf(strength / 30.0, 0.2, 1.0))
+	if strength > 14.0:
+		Input.vibrate_handheld(int(clampf(strength * 2.0, 20.0, 80.0)))
+
 func _on_scrape(strength: float) -> void:
 	if args.has("log"):
 		print("raspão %.0f em %s" % [strength, player.global_position])
 	audio.scrape(strength)
 	cam.kick(minf(1.0, strength / 40.0))
 	Input.vibrate_handheld(int(clampf(strength, 10.0, 60.0)))
+
+## Piloto automático preso contra uma parede durante 4 s: volta ao último portão (só nos testes).
+var _stuck_t := 0.0
+var _stuck_p := Vector3.ZERO
+func _check_stuck(dt: float) -> void:
+	if not player.autopilot or not player.running:
+		return
+	_stuck_t += dt
+	if _stuck_t > 4.0:
+		if player.global_position.distance_to(_stuck_p) < 15.0:
+			print("PRESO em ", player.global_position)
+			player.running = false
+			_on_crash()
+		_stuck_t = 0.0
+		_stuck_p = player.global_position
 
 func _adapt_quality(dt: float) -> void:
 	if args.has("autoplay"):
@@ -244,10 +289,10 @@ func _adapt_quality(dt: float) -> void:
 func _load_best() -> float:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
-		return float(cfg.get_value("race", "best", 0.0))
+		return float(cfg.get_value("race_v3", "best", 0.0))
 	return 0.0
 
 func _save_best() -> void:
 	var cfg := ConfigFile.new()
-	cfg.set_value("race", "best", best)
+	cfg.set_value("race_v3", "best", best)
 	cfg.save(SAVE_PATH)

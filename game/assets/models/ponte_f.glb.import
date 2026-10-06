@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b77o0twejq5c6"
-path="res://.godot/imported/pebbles.glb-e5cad29af0b2e07bf9c8d641cd2b004f.scn"
+uid="uid://dslhpfwptf67l"
+path="res://.godot/imported/ponte_f.glb-bb5d1a83c4a3e2196be106b57e9b2244.scn"
 
 [deps]
 
-source_file="res://assets/models/pebbles.glb"
-dest_files=["res://.godot/imported/pebbles.glb-e5cad29af0b2e07bf9c8d641cd2b004f.scn"]
+source_file="res://assets/models/ponte_f.glb"
+dest_files=["res://.godot/imported/ponte_f.glb-bb5d1a83c4a3e2196be106b57e9b2244.scn"]
 
 [params]
 
