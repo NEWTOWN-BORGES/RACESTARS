@@ -1,11 +1,11 @@
 """
 RACESTARS — gera o MAPA da corrida (6 x 6 km, de A até B, ~18 km de percurso).
 
-Uso:  python tools/make_map.py        (precisa de numpy, scipy e pillow)
+Uso:  python tools/make_map.py        (precisa de numpy, scipy, pillow e zstandard)
 
 Gera em game/assets/map/:
-  height.bin    alturas em "células" (metros / 4), float32, 1537 x 1537, linha = z, coluna = x
-  biome.bin     mapa de biomas RGBA8 768 x 768 (R relva, G selva/musgo, B rocha vermelha, A calcário branco)
+  height.zst    alturas em "células" (metros / 4), float16, 1537 x 1537, linha = z, coluna = x (zstd)
+  biome.zst     mapa de biomas RGBA8 768 x 768 (R relva, G selva/musgo, B rocha vermelha, A calcário branco) (zstd)
   map.json      portões, caminhos (por nível), túneis, pontes, aqueduto, lago, peças, vegetação
   minimap.png   mapa visto de cima
 
@@ -644,8 +644,14 @@ sections = [{'key': s.key, 'title': TITLES[s.key], 'biome': s.biome,
 
 # ------------------------------------------------------------------ saída
 os.makedirs(OUT, exist_ok=True)
-(H / CELL).astype(np.float32).tofile(os.path.join(OUT, 'height.bin'))
-biome8.tofile(os.path.join(OUT, 'biome.bin'))
+# alturas em meia precisão (float16, em células) e biomas, comprimidos com zstd (APK mais pequeno)
+import zstandard
+zc = zstandard.ZstdCompressor(level=19)
+open(os.path.join(OUT, 'height.zst'), 'wb').write(zc.compress((H / CELL).astype(np.float16).tobytes()))
+open(os.path.join(OUT, 'biome.zst'), 'wb').write(zc.compress(biome8.tobytes()))
+for old in ('height.bin', 'biome.bin'):
+    if os.path.exists(os.path.join(OUT, old)):
+        os.remove(os.path.join(OUT, old))
 CH = 128
 nch = (RES - 1) // CH
 chunks = []
@@ -661,8 +667,8 @@ data = {'size': SIZE, 'res': RES, 'cell': CELL, 'ground': GROUND, 'water_y': WAT
 json.dump(data, open(os.path.join(OUT, 'map.json'), 'w'), separators=(',', ':'), ensure_ascii=False)
 
 # ------------------------------------------------------------------ minimapa
-MM = 512
-hs = H[::3, ::3]
+MM = 384
+hs = H[::4, ::4]
 gy, gx = np.gradient(hs)
 shade = np.clip(0.8 + (-gx * 0.55 - gy * 0.35) / 3.5, 0.45, 1.15)
 bz = np.array(Image.fromarray((biome * 255).astype(np.uint8), 'RGBA').resize(hs.shape[::-1], Image.BILINEAR)).astype(np.float32) / 255
@@ -673,7 +679,7 @@ col = col * (1 - bz[..., 0:1] * 0.9) + grassc * bz[..., 0:1] * 0.9
 col = col * (1 - bz[..., 1:2] * 0.8) + jung * bz[..., 1:2] * 0.8
 col *= shade[..., None]
 lk = lakes[0]
-in_lake = np.hypot(X[::3, ::3] - lk['c'][0], Z[::3, ::3] - lk['c'][1]) < lk['r']
+in_lake = np.hypot(X[::4, ::4] - lk['c'][0], Z[::4, ::4] - lk['c'][1]) < lk['r']
 col = np.where(((hs < WATER_Y) & in_lake)[..., None], np.array([70, 140, 190]) * (0.85 + 0.15 * shade[..., None]), col)
 img = Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).resize((MM, MM), Image.LANCZOS)
 dr = ImageDraw.Draw(img)

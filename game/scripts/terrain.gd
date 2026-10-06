@@ -1,5 +1,5 @@
 extends Node3D
-## Terreno do mapa (6 x 6 km) a partir de assets/map/height.bin.
+## Terreno do mapa (6 x 6 km) a partir de assets/map/height.zst.
 ## Para não engasgar no telemóvel nada é construído durante o jogo: há só 5 grelhas planas
 ## (uma por nível de detalhe) partilhadas por todos os pedaços de 512 m; a altura de cada
 ## vértice é lida na placa gráfica de uma textura. Trocar o nível de detalhe é só trocar a grelha.
@@ -27,12 +27,15 @@ func setup(info: Dictionary) -> void:
 	cell = float(info.cell)
 	half = float(info.size) * 0.5
 	chunk_cells = int(info.chunk_cells)
-	var raw := FileAccess.get_file_as_bytes("res://assets/map/height.bin")
-	heights = raw.to_float32_array()
-	var himg := Image.create_from_data(res, res, false, Image.FORMAT_RF, raw)
+	# alturas: float16 comprimido com zstd -> textura (placa gráfica) e float32 (colisão)
+	var raw := FileAccess.get_file_as_bytes("res://assets/map/height.zst").decompress(res * res * 2, FileAccess.COMPRESSION_ZSTD)
+	var himg := Image.create_from_data(res, res, false, Image.FORMAT_RH, raw)
 	var htex := ImageTexture.create_from_image(himg)
+	himg.convert(Image.FORMAT_RF)
+	heights = himg.get_data().to_float32_array()
 	var bres := int(info.biome_res)
-	var bimg := Image.create_from_data(bres, bres, false, Image.FORMAT_RGBA8, FileAccess.get_file_as_bytes("res://assets/map/biome.bin"))
+	var braw := FileAccess.get_file_as_bytes("res://assets/map/biome.zst").decompress(bres * bres * 4, FileAccess.COMPRESSION_ZSTD)
+	var bimg := Image.create_from_data(bres, bres, false, Image.FORMAT_RGBA8, braw)
 	bimg.generate_mipmaps()
 	biome_texture = ImageTexture.create_from_image(bimg)
 	material = ShaderMaterial.new()

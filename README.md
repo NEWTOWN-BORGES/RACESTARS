@@ -94,7 +94,7 @@ No minimapa, cada cor é um nível:
 ## Gerar tudo de novo
 
 ```bash
-pip install numpy scipy pillow bpy==5.0.1
+pip install numpy scipy pillow zstandard bpy==5.0.1
 python tools/make_map.py              # mapa (game/assets/map/)
 python blender/build_assets.py        # peças .glb (túneis e pontes à medida de map.json)
 python tools/make_sounds.py           # sons
