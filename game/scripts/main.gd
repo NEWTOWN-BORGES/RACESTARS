@@ -22,6 +22,11 @@ var crash_time := 0.0
 var elapsed := 0.0
 var args := {}
 var shots: Array = []
+var fx: Node
+var audio: Node
+var _fps_acc := 0.0
+var _fps_n := 0
+var _quality := 2      # 2 = alta, 1 = sem borrão, 0 = sem sombras
 
 @onready var world = $World
 @onready var player = $Player
@@ -30,6 +35,7 @@ var shots: Array = []
 @onready var sun: DirectionalLight3D = $Sun
 
 func _ready() -> void:
+	DisplayServer.screen_set_keep_on(true)
 	_setup_input()
 	args = _parse_args()
 	var az := deg_to_rad(SUN_AZIMUTH)
@@ -50,6 +56,12 @@ func _ready() -> void:
 	cam.player = player
 	cam.snap()
 	player.crashed.connect(_on_crash)
+	player.near_miss.connect(_on_near_miss)
+	fx = preload("res://scripts/speed_fx.gd").new()
+	add_child(fx)
+	fx.setup(player, cam)
+	audio = preload("res://scripts/audio.gd").new()
+	add_child(audio)
 	best = _load_best()
 	hud.show_menu(best)
 	if args.has("shots"):
@@ -93,15 +105,21 @@ func _start() -> void:
 	start_z = player.global_position.z
 	player.start()
 	hud.show_run()
+	audio.start_run()
 
 func distance() -> float:
 	return maxf(0.0, start_z - player.global_position.z)
 
 func _process(dt: float) -> void:
 	elapsed += dt
+	var p: Vector3 = player.global_position
+	var tunnel: bool = world.in_tunnel(p)
+	var frac: float = player.speed_fraction()
 	if state == State.RUN:
-		var p: Vector3 = player.global_position
-		hud.update_run(distance(), player.speed * 3.6, best, world.ridge_ahead(p), world.in_tunnel(p))
+		hud.update_run(distance(), player.speed * 3.6, best, world.ridge_ahead(p), tunnel)
+		_adapt_quality(dt)
+	fx.update(player.running, player.speed, frac, tunnel)
+	audio.update(player.running, frac, tunnel, dt)
 	sun.global_position = player.global_position
 	if not shots.is_empty() and elapsed >= shots[0]:
 		var t: float = shots.pop_front()
@@ -122,8 +140,33 @@ func _on_crash() -> void:
 		best = d
 		_save_best()
 	cam.shake()
+	audio.crash()
+	Input.vibrate_handheld(250)
 	hud.show_crash(d, best, record)
 	print("BATEU em ", int(d), " m  (", player.last_hit, ")")
+
+func _on_near_miss() -> void:
+	audio.near_miss(player.speed_fraction())
+	cam.kick(1.0)
+	Input.vibrate_handheld(25)
+
+## Se o celular não aguentar, desliga o borrão e depois as sombras (mantém o jogo fluido).
+func _adapt_quality(dt: float) -> void:
+	if args.has("autoplay"):
+		return
+	_fps_acc += 1.0 / maxf(dt, 0.0001)
+	_fps_n += 1
+	if _fps_n < 180:
+		return
+	var avg := _fps_acc / _fps_n
+	_fps_acc = 0.0
+	_fps_n = 0
+	if avg < 45.0 and _quality == 2:
+		_quality = 1
+		fx.blur_enabled = false
+	elif avg < 40.0 and _quality == 1:
+		_quality = 0
+		sun.shadow_enabled = false
 
 func _load_best() -> float:
 	var cfg := ConfigFile.new()

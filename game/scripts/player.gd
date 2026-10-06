@@ -3,6 +3,7 @@ extends CharacterBody3D
 ## Controles: ← → / A D, ou tocar/segurar nos lados da tela (ou arrastar o dedo).
 
 signal crashed
+signal near_miss
 
 const START_SPEED := 42.0      # m/s (~150 km/h)
 const MAX_SPEED := 125.0       # m/s (~450 km/h)
@@ -29,7 +30,22 @@ var _touches := {}
 @onready var model: Node3D = $Model
 @onready var engine_light: OmniLight3D = $EngineLight
 
+var _near_cd := 0.0
+
 func _ready() -> void:
+	# sensor um pouco maior que o veículo: obstáculo passando rente = "zum!"
+	var area := Area3D.new()
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(9.0, 2.4, 5.0)
+	cs.shape = box
+	cs.position = Vector3(0.0, 1.6, 0.0)
+	area.add_child(cs)
+	add_child(area)
+	area.body_shape_entered.connect(func(_rid, _body, _bi, _li):
+		if running and _near_cd <= 0.0:
+			_near_cd = 0.3
+			near_miss.emit())
 	_ap_box.size = Vector3(3.3, 1.1, 4.2)
 	_ap_query.shape = _ap_box
 	_ap_query.exclude = [get_rid()]
@@ -43,6 +59,7 @@ func speed_fraction() -> float:
 
 func _physics_process(dt: float) -> void:
 	_t += dt
+	_near_cd -= dt
 	steer = _autopilot() if autopilot else _read_input()
 	if running:
 		speed = minf(MAX_SPEED, speed + ACCEL * dt)

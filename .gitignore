@@ -1,11 +1,12 @@
-# Godot
-.godot/
-*.tmp
-export/
 # Blender
-*.blend1
+# Godot
 # Sistema
+*.blend1
+*.tmp
 .DS_Store
+.godot/
 Thumbs.db
-node_modules/
 blender/__pycache__/
+build/
+export/
+node_modules/

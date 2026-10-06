@@ -27,6 +27,7 @@ ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
 # ------------------------------------------------------------------ paleta
 # c = cor base (sRGB), e = cor de emissão, s = força da emissão, r = rugosidade
 PAL = {
+    'base': {'c': '#ffffff'},
     'sand_light': {'c': '#f3dcb0'}, 'sand': {'c': '#e9bf86'}, 'sand_orange': {'c': '#e39a5e'},
     'rust': {'c': '#c9643f'}, 'rust_dark': {'c': '#94493b'},
     'cream': {'c': '#efe3c8'}, 'cream_dark': {'c': '#cdbd9d'},
@@ -70,6 +71,9 @@ def M(name):
     if 'e' in spec:
         bsdf.inputs['Emission Color'].default_value = (*srgb(spec['e']), 1)
         bsdf.inputs['Emission Strength'].default_value = spec.get('s', 3.0)
+    if name == 'base':  # cor vem dos vértices (atributo 'Col')
+        attr = nt.nodes.new('ShaderNodeVertexColor'); attr.layer_name = 'Col'
+        nt.links.new(attr.outputs['Color'], bsdf.inputs['Base Color'])
     m.diffuse_color = (*col, 1)
     _mats[name] = m
     return m
@@ -153,9 +157,24 @@ class Mesh:
                 f = self.bm.faces.new(r); f.material_index = i
         bmesh.ops.recalc_face_normals(self.bm, faces=list({f for r in rings for v in r for f in v.link_faces}))
     def done(self, smooth=False):
+        """Cria o objeto. As cores 'comuns' viram cor de vértice num único material
+        (menos chamadas de desenho no celular); só os materiais que brilham ficam separados."""
         bm = self.bm; bm.normal_update()
         me = bpy.data.meshes.new(self.name); bm.to_mesh(me); bm.free()
-        for m in self.mats: me.materials.append(M(m))
+        final = ['base']; remap = {}
+        for i, name in enumerate(self.mats):
+            if 'e' in PAL[name]:
+                if name not in final: final.append(name)
+                remap[i] = final.index(name)
+            else:
+                remap[i] = 0
+        col = me.color_attributes.new('Col', 'FLOAT_COLOR', 'CORNER')
+        for p in me.polygons:
+            c = srgb(PAL[self.mats[p.material_index]]['c']) + [1.0]
+            for li in p.loop_indices: col.data[li].color = c
+            p.material_index = remap[p.material_index]
+        me.color_attributes.active_color = col
+        for m in final: me.materials.append(M(m))
         for p in me.polygons: p.use_smooth = smooth
         ob = bpy.data.objects.new(self.name, me); COLL.objects.link(ob)
         return ob
@@ -350,6 +369,87 @@ def make_pebbles(name, seed):
         vs = m.ico(rnd.choice(['rock_lav', 'cream_dark', 'sand']), r, T(rnd.uniform(-0.8, 0.8), rnd.uniform(-0.8, 0.8), r * 0.3) @ S(1, 0.8, 0.5), sub=1)
     return m.done()
 
+def _arch_span(m, cx, R, base_z, rise, width, depth, seed, rings=25):
+    """Ponte em arco entre duas pernas (varredura de um retângulo)."""
+    path, norms = [], []
+    for k in range(rings):
+        a = math.pi * (1 - k / (rings - 1))
+        path.append(Vector((cx + R * math.cos(a), 0, base_z + R * rise * math.sin(a))))
+        norms.append(Vector((math.cos(a) * rise, 0, math.sin(a))).normalized())
+    before = set(m.bm.verts)
+    m.sweep('sand', path, norms, width, -depth / 2, depth / 2)
+    new = [v for v in m.bm.verts if v not in before]
+    m.paint(new, lambda f: 'moss' if f.normal.z > 0.65 else BANDS[int((f.calc_center_median().x + 200) / (width * 0.7)) % 4])
+    m.jitter(new, width * 0.12, 0.6 / width * 2, seed, radial=False)
+
+def make_arch_giant(name, seed):
+    """Arco de pedra gigante: vão de ~40 m de largura e ~35 m de altura."""
+    rnd = random.Random(seed); m = Mesh(name)
+    gap, leg_r, leg_h = 44.0, 10.0, 26.0
+    for sx in (-1, 1):
+        vs, _ = strata_column(m, rnd, leg_r, leg_h, 4, x0=sx * (gap / 2 + leg_r * 0.8), segs=10, moss_top=False)
+        m.jitter([v for v in vs if v.co.z > 0.3], 1.3, 0.12, seed + sx)
+    _arch_span(m, 0, gap / 2 + leg_r * 0.8, leg_h - 1.5, 0.55, 10.0, 14.0, seed + 3, rings=33)
+    return m.done()
+
+def make_arch_twin(name, seed):
+    """Dois arcos lado a lado (três pernas)."""
+    rnd = random.Random(seed); m = Mesh(name)
+    gap, leg_r, leg_h = 16.0, 4.5, 16.0
+    step = gap + leg_r * 1.6
+    for x in (-step, 0.0, step):
+        vs, _ = strata_column(m, rnd, leg_r, leg_h, 3, x0=x, moss_top=False)
+        m.jitter([v for v in vs if v.co.z > 0.3], 0.5, 0.3, seed + int(x))
+    for c in (-step / 2, step / 2):
+        _arch_span(m, c, step / 2, leg_h - 0.8, 0.7, 4.0, 5.5, seed + int(c) + 9)
+    return m.done()
+
+def make_rock_ring(name, seed):
+    """Anel de pedra meio enterrado: passa-se pelo buraco (~15 m)."""
+    rnd = random.Random(seed); m = Mesh(name)
+    Rr, w, cz = 13.5, 7.0, 6.0
+    path, norms = [], []
+    a0 = math.asin(max(-1.0, min(1.0, (-cz - 1.0) / Rr)))
+    n = 40
+    for k in range(n + 1):
+        a = lerp(a0, math.pi - a0, k / n)
+        path.append(Vector((Rr * math.cos(a), 0, cz + Rr * math.sin(a))))
+        norms.append(Vector((math.cos(a), 0, math.sin(a))))
+    before = set(m.bm.verts)
+    m.sweep('sand', path, norms, w, -4.5, 4.5)
+    new = [v for v in m.bm.verts if v not in before]
+    m.paint(new, lambda f: 'moss' if f.normal.z > 0.7 else BANDS[int((f.calc_center_median().z + 50) / 4.0) % 4])
+    m.jitter(new, 0.9, 0.18, seed, radial=False)
+    for sx in (-1, 1):
+        vs = m.ico('rust', 5.0, T(sx * 13.5, 0, 0.5) @ S(1.4, 1.3, 0.6), sub=1)
+        m.jitter(vs, 0.8, 0.3, seed + sx, radial=False)
+    return m.done()
+
+def make_rock_fin(name, seed):
+    """Lâmina de rocha alta e fina, em camadas."""
+    rnd = random.Random(seed); m = Mesh(name)
+    L, Tk, H, tiers = 30.0, 6.0, 44.0, 6
+    z = 0.0
+    for i in range(tiers):
+        h = H / tiers; k = 1 - i * 0.11
+        vs = m.box(BANDS[(i + rnd.randint(0, 1)) % 4], rnd.uniform(-1, 1), rnd.uniform(-0.4, 0.4), z + h / 2, L * k, Tk * (1 - i * 0.07), h, RZ(rnd.uniform(-4, 4)))
+        z += h
+    allv = list(m.bm.verts)
+    bmesh.ops.subdivide_edges(m.bm, edges=list(m.bm.edges), cuts=2, use_grid_fill=True)
+    m.jitter([v for v in m.bm.verts if v.co.z > 0.3], 1.2, 0.15, seed, radial=False)
+    m.cone('moss', 3.5, 2.0, 1.2, T(0, 0, z + 0.3), segs=8)
+    return m.done()
+
+def make_butte(name, seed):
+    """Formação gigante (marco no horizonte): ~100 m de largura, ~70 m de altura."""
+    rnd = random.Random(seed); m = Mesh(name)
+    vs, top = strata_column(m, rnd, 48.0, 66.0, 5, segs=16)
+    m.jitter([v for v in vs if v.co.z > 0.3], 5.0, 0.04, seed)
+    for (x, y, r, h) in [(52, 10, 10, 50), (-50, -14, 8, 40), (20, -46, 7, 34)]:
+        v2, _ = strata_column(m, rnd, r, h, 4, x0=x, y0=y)
+        m.jitter([v for v in v2 if v.co.z > 0.3], r * 0.12, 0.2, seed + int(x))
+    return m.done()
+
 # ------------------------------------------------------------------ cordilheira com túnel
 RIDGE_W, RIDGE_L = 60.0, 180.0      # largura (repete sem emenda no eixo X) e comprimento do túnel
 TUN_HW, TUN_WALL, TUN_ARCH = 7.0, 7.0, 4.0   # meia-largura, altura da parede, altura do arco
@@ -494,6 +594,11 @@ def build_all():
     B.append(make_float_island('float_island', 15))
     B.append(make_grass('grass_tuft', 1))
     B.append(make_pebbles('pebbles', 2))
+    B.append(make_arch_giant('arch_giant', 41))
+    B.append(make_arch_twin('arch_twin', 43))
+    B.append(make_rock_ring('rock_ring', 47))
+    B.append(make_rock_fin('rock_fin', 53))
+    B.append(make_butte('butte', 59))
     B.append(make_ridge('ridge_tunnel'))
     return B
 
@@ -504,16 +609,17 @@ def export(objs):
         ob.select_set(True); bpy.context.view_layer.objects.active = ob
         path = os.path.join(OUT, ob.name + '.glb')
         bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_yup=True,
-                                  export_apply=True, export_materials='EXPORT', export_cameras=False, export_lights=False)
+                                  export_apply=True, export_materials='EXPORT', export_cameras=False, export_lights=False,
+                                  export_vertex_color='ACTIVE')
         print('exportado', os.path.relpath(path, os.path.join(HERE, '..')), len(ob.data.polygons), 'faces')
 
 def layout(objs):
     """Arruma as peças em duas fileiras no .blend (grandes atrás, pequenas na frente)."""
-    big = ['ridge_tunnel', 'mesa', 'arch', 'rock_spire_c', 'rock_spire_a', 'rock_spire_b', 'float_island']
+    big = ['ridge_tunnel', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
     def width(ob): return max(v.co.x for v in ob.data.vertices) - min(v.co.x for v in ob.data.vertices)
     rows = {0: [o for o in objs if o.name not in big], 1: [o for o in objs if o.name in big]}
     for row, items in rows.items():
-        x = 0.0; y = 0.0 if row == 0 else 70.0
+        x = 0.0; y = 0.0 if row == 0 else 110.0
         for ob in items:
             w = width(ob); x += w / 2 + (3 if row == 0 else 8)
             ob.location = (x, y, 45 if ob.name == 'float_island' else 0); x += w / 2
@@ -534,7 +640,7 @@ def preview():
     gm = bpy.data.meshes.new('chao'); bmc = bmesh.new(); bmesh.ops.create_grid(bmc, x_segments=1, y_segments=1, size=400); bmc.to_mesh(gm); bmc.free()
     gm.materials.append(M('sand_light')); g = bpy.data.objects.new('chao', gm); COLL.objects.link(g)
     cam = bpy.data.cameras.new('cam'); cam.lens = 24; co = bpy.data.objects.new('cam', cam); COLL.objects.link(co)
-    co.location = (0, -125, 62); co.rotation_euler = (math.radians(64), 0, 0)
+    co.location = (0, -190, 95); co.rotation_euler = (math.radians(64), 0, 0)
     sc.camera = co; sc.render.filepath = PREVIEW
     bpy.ops.render.render(write_still=True)
     for ob in (so, g, co): bpy.data.objects.remove(ob)
