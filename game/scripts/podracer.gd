@@ -1,30 +1,35 @@
 extends CharacterBody3D
 ## Veículo "Vespa": flutua sobre o terreno (e sobre a água), acelera sozinho, vira, salta,
 ## raspa nas paredes (perde velocidade) e bate de frente (volta ao último portão).
-## Quanto mais rápido, mais aberta é a curva: nas curvas apertadas é preciso TRAVAR.
-## Travar e virar ao mesmo tempo faz o veículo derrapar e fechar a curva.
-## Toque: metade esquerda do ecrã = virar (◀ ▶), metade direita = travão.
+## Quanto mais rápido, mais aberta é a curva. O TRAVÃO é um travão de mão: travar e virar
+## solta a traseira e o veículo DERRAPA (fecha a curva quase sem perder velocidade);
+## uma derrapagem comprida dá um pequeno impulso à saída. Bater não pára a corrida:
+## ressalta e perde velocidade. Pedras no chão não são obstáculos (passa-se por cima).
+## Toque: metade esquerda do ecrã = virar (◀ ▶), metade direita = travão de mão.
 ## Teclado: ← → / A D para virar, ↓ / S / Espaço para travar.
 
-signal crashed
-signal scraped(strength: float)
+signal crashed                      # só para quedas no abismo (tratado pela corrida)
+signal scraped(strength: float)     # raspão ou batida (o carro continua)
 signal landed(strength: float)
+signal boosted(amount: float)
 
 const MAX_SPEED := 125.0        # m/s (450 km/h)
 const ACCEL := 19.0
-const BRAKE := 52.0
-const MIN_BRAKE_SPEED := 14.0
 const TURN_LOW := 1.9           # rad/s quando vai devagar
-const TURN_HIGH := 0.48         # rad/s à velocidade máxima (curva com ~260 m de raio)
-const BRAKE_TURN := 1.45        # travar + virar fecha mais a curva
-const GRIP := 2.6               # quão rápido a velocidade se alinha com o nariz (derrapagem)
+const TURN_HIGH := 0.55         # rad/s à velocidade máxima (curva larga)
+const GRIP := 2.6               # quão rápido a velocidade se alinha com o nariz
+const HB_TURN := 2.2            # travão de mão + virar: vira muito mais
+const HB_GRIP := 0.35           # ...com a traseira solta (derrapa)
+const HB_DECEL := 7.0           # perde só um pouco de velocidade a derrapar
+const HB_DECEL_STRAIGHT := 14.0 # travão de mão a direito: trava mais
+const BOOST_MAX := 16.0         # m/s a mais depois de uma boa derrapagem
 const HOVER := 1.1
 const SPRING := 70.0
 const DAMP := 10.0
 const GRAVITY := 24.0
 const WATER_SPEED := 0.8        # na água anda mais devagar
-const CRASH_IMPACT := 50.0      # contra rochas e peças
-const CRASH_IMPACT_WALL := 72.0 # contra as encostas do terreno: mais tolerante
+const SOLID_MASK := 1           # camada 1: paredes, rochas altas, troncos, túneis, pontes
+const RIDE_MASK := 3            # o raio do chão também vê a camada 2 (pedras baixas: passa-se por cima)
 const MODEL_OFFSET := Vector3(0.0, 0.0, 4.0)   # o modelo nasce na cabine; recua para o centro ficar na origem
 
 var running := false
@@ -35,6 +40,10 @@ var steer_target := 0.0
 var braking := false
 var on_ground := false
 var on_water := false
+var drifting := false
+var drift_charge := 0.0
+var boost := 0.0
+var slip := 0.0
 var ground_normal := Vector3.UP
 var steer_visual := 0.0
 var autopilot := false
@@ -51,6 +60,7 @@ var _air_time := 0.0
 
 func _ready() -> void:
 	motion_mode = MOTION_MODE_FLOATING
+	collision_mask = SOLID_MASK
 	wall_min_slide_angle = deg_to_rad(10.0)
 
 func speed() -> float:
@@ -99,6 +109,7 @@ func _physics_process(dt: float) -> void:
 	var from := global_position + Vector3(0, 3.0, 0)
 	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, -14.0, 0))
 	q.exclude = [get_rid()]
+	q.collision_mask = RIDE_MASK
 	var hit := space.intersect_ray(q)
 	var ground_y := -INF
 	on_water = false
@@ -109,28 +120,46 @@ func _physics_process(dt: float) -> void:
 	var err := (ground_y + HOVER) - global_position.y
 	if running:
 		var v := speed()
+		var vh := Vector3(vel.x, 0.0, vel.z)
+		slip = 0.0 if v < 5.0 else forward().signed_angle_to(vh, Vector3.UP)
+		var hb_turning := braking and absf(steer) > 0.1
 		var turn := steer * turn_rate(v) * (1.0 if on_ground else 0.55)
-		if braking and absf(steer) > 0.1:
-			turn *= BRAKE_TURN
+		if hb_turning:
+			turn *= HB_TURN
 		heading += turn * dt
 		var fwd := forward()
-		var vh := Vector3(vel.x, 0.0, vel.z)
 		var along := vh.dot(fwd)
 		var side := vh - fwd * along
-		var top := MAX_SPEED * (WATER_SPEED if on_water else 1.0)
+		var top := MAX_SPEED * (WATER_SPEED if on_water else 1.0) + boost
 		if braking:
-			along = move_toward(along, MIN_BRAKE_SPEED, BRAKE * dt)
+			along = move_toward(along, 10.0, (HB_DECEL if hb_turning else HB_DECEL_STRAIGHT) * dt)
 		elif on_ground:
 			if along > top:
 				along = move_toward(along, top, ACCEL * 0.6 * dt)
 			else:
 				along = move_toward(along, top, ACCEL * (1.0 - 0.5 * clampf(along / MAX_SPEED, 0.0, 1.0)) * dt)
-		# travar solta a traseira: derrapa mais
-		var grip := GRIP * (0.55 if braking else 1.0) * (1.0 if on_ground else 0.3)
+		# travão de mão: a traseira solta-se e a velocidade continua para onde ia (derrapagem)
+		var grip := (HB_GRIP if braking else GRIP) * (1.0 if on_ground else 0.3)
 		side *= exp(-grip * dt)
+		# a velocidade lateral que se perde vira velocidade para a frente (derrapar não "trava")
+		var lost := side.length() * (1.0 - exp(-grip * dt))
+		along += lost * (0.85 if braking else 0.5)
 		vh = fwd * along + side
 		vel.x = vh.x
 		vel.z = vh.z
+		# carga da derrapagem -> impulso ao largar
+		drifting = braking and on_ground and v > 30.0 and absf(slip) > 0.18
+		if drifting:
+			drift_charge = minf(drift_charge + dt, 2.5)
+		elif not braking:
+			if drift_charge > 0.6:
+				boost = BOOST_MAX * clampf(drift_charge / 2.0, 0.35, 1.0)
+				var f2 := forward()
+				vel.x += f2.x * boost * 0.6
+				vel.z += f2.z * boost * 0.6
+				boosted.emit(boost)
+			drift_charge = 0.0
+		boost = move_toward(boost, 0.0, dt * 9.0)
 	elif on_ground:
 		vel.x *= exp(-1.2 * dt)
 		vel.z *= exp(-1.2 * dt)
@@ -156,24 +185,28 @@ func _physics_process(dt: float) -> void:
 	move_and_slide()
 	vel = velocity
 	if running:
+		# bater não acaba a corrida: ressalta, desvia para o lado da parede e perde velocidade
+		var worst := 0.0
 		for i in get_slide_collision_count():
 			var c := get_slide_collision(i)
 			var n := c.get_normal()
 			if n.y > 0.6:
 				continue
 			var impact := -before.dot(n)
-			var col := c.get_collider()
-			var limit := CRASH_IMPACT_WALL if col and col.has_meta("terrain") else CRASH_IMPACT
-			if impact > limit:
-				if autopilot:
-					print("  colisão: ", col, " normal=", n, " impacto=", snappedf(impact, 0.1))
-				running = false
-				vel = Vector3.ZERO
-				crashed.emit()
-				break
-			elif impact > 6.0:
-				vel *= 1.0 - clampf(impact / 160.0, 0.0, 0.45)
-				scraped.emit(impact)
+			if impact > worst:
+				worst = impact
+				var hn := Vector3(n.x, 0.0, n.z).normalized()
+				if impact > 6.0:
+					vel *= 1.0 - clampf(impact / 150.0, 0.08, 0.6)
+					vel += hn * minf(impact * 0.3, 14.0)
+					var along_wall := Vector3(vel.x, 0.0, vel.z)
+					if along_wall.length() > 4.0 and impact > 20.0:
+						heading = lerp_angle(heading, atan2(-along_wall.x, -along_wall.z), 0.35)
+		if worst > 6.0:
+			if autopilot and worst > 50.0:
+				print("  batida forte: impacto=", snappedf(worst, 0.1), " em ", global_position)
+			drift_charge = 0.0
+			scraped.emit(worst)
 	_update_visual(dt)
 
 func _update_visual(dt: float) -> void:
@@ -237,6 +270,7 @@ func _avoid(v: float) -> float:
 		var from := global_position + Vector3(0, 1.3, 0) + right * off   # à altura da caixa do veículo
 		var q := PhysicsRayQueryParameters3D.create(from, from + fwd * reach)
 		q.exclude = [get_rid()]
+		q.collision_mask = SOLID_MASK
 		var hit := space.intersect_ray(q)
 		if hit.is_empty() or (hit.collider != null and hit.collider.has_meta("terrain")):
 			continue
@@ -275,18 +309,12 @@ func _autopilot() -> void:
 	var want := atan2(-to.x, -to.y)
 	var diff := wrapf(want - heading, -PI, PI)
 	steer_target = clampf(diff * 3.0 + _avoid(v), -1.0, 1.0)
-	# trava antes das curvas fechadas: velocidade que a curva aguenta a cada distância à frente
+	# curvas fechadas: puxa o travão de mão (derrapa) quando a curva logo à frente é mais apertada
+	# do que o veículo consegue fazer a esta velocidade
 	braking = false
-	var d := 0.0
-	for j in range(1, 30):
+	for j in range(1, 10):
 		var idx := mini(_route_i + j, route.size() - 1)
-		d += 8.0
 		var kap := _kappa[idx] if idx < _kappa.size() else 0.0
-		if kap < 0.002:
-			continue
-		var allowed := MAX_SPEED
-		while allowed > 20.0 and allowed * kap > turn_rate(allowed) * 0.8:
-			allowed -= 5.0
-		if v * v - allowed * allowed > 2.0 * BRAKE * 0.55 * d:
+		if v * kap > turn_rate(v) * 0.85 and absf(diff) > 0.04:
 			braking = true
 			break

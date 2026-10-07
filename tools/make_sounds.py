@@ -147,6 +147,23 @@ def land():
     grit = fft_filter(rng.standard_normal(n), band(400, 5000)); grit = grit / np.std(grit) * np.exp(-t / 0.12)
     return thump + grit * 0.35
 
+def drift_loop():
+    """Derrapagem: chiado de ar/areia (loop de 2 s)."""
+    t = t_axis(2.0); n = len(t)
+    nz = fft_filter(rng.standard_normal(n), band(900, 5200, 1.2)); nz /= np.std(nz)
+    wob = 0.8 + 0.2 * np.sin(2 * np.pi * 3 * t) + 0.1 * np.sin(2 * np.pi * 7.5 * t)
+    tone = 0.25 * np.sin(2 * np.pi * 620 * t + 2 * np.sin(2 * np.pi * 2 * t))
+    return (nz * 0.8 + tone) * wob
+
+def boost():
+    """Impulso à saída da derrapagem: sopro que sobe."""
+    t = t_axis(0.9); n = len(t)
+    f = np.interp(t, [0, 0.9], [180, 900])
+    sweep = np.sin(2 * np.pi * np.cumsum(f) / SR) * 0.5
+    nz = fft_filter(rng.standard_normal(n), band(300, 4000)); nz /= np.std(nz)
+    e = np.minimum(1, t / 0.05) * np.exp(-t / 0.35)
+    return (sweep + nz * 0.5) * e
+
 # ---------------------------------------------------------------- música (loop 8 compassos, 100 bpm)
 def note(n):  # MIDI -> Hz
     return 440.0 * 2 ** ((n - 69) / 12)
@@ -206,6 +223,8 @@ if __name__ == '__main__':
     save('finish', finish(), 0.85)
     save('scrape', scrape(), 0.8)
     save('land', land(), 0.85)
+    save('drift_loop', drift_loop(), 0.7)
+    save('boost', boost(), 0.8)
     save('wind_loop', wind(), 0.8)
     save('whoosh', whoosh(), 0.9)
     save('crash', crash(), 0.95)

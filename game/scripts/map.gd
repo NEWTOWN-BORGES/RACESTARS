@@ -1,12 +1,15 @@
 extends Node3D
-## Coloca no mapa tudo o que vem do Blender e de map.json: rochas, árvores, ruínas, túneis,
-## pontes, aqueduto, teto da fenda, lago com água, ilhas flutuantes, relva, bandeirolas,
-## e os portões da corrida (checkpoints) com as balizas de cada caminho.
+## Coloca no mundo tudo o que vem do Blender e de map.json: rochas, árvores, ruínas, túneis,
+## pontes, aqueduto, tetos de pedra, lagos e rios, ilhas flutuantes, relva e flores, bandeirolas,
+## manadas, as estruturas colossais (vêem-se a muitos km) e os portões do circuito com as balizas.
+## Tudo é estático (sem animações) para ser leve no telemóvel. As colisões das peças são criadas
+## direto no servidor de física (muito mais leve que nós).
 
 signal checkpoint_passed(index: int)
 signal finish_passed
 
-const CELL_GROUP := 512.0
+const CELL_GROUP := 1024.0       # peças agrupadas em quadrados de 1 km (um MultiMesh por tipo)
+const COVER_GROUP := 256.0       # relva/flores em quadrados mais pequenos (vêem-se só de perto)
 const ROCK_PROPS := ["rock_spire_a", "rock_spire_b", "rock_spire_c", "boulder_a", "boulder_b", "mesa", "arch",
 	"arch_giant", "arch_twin", "rock_ring", "rock_fin", "butte", "canyon_roof"]
 # forma de colisão de cada peça: convexa, malha exata, ou cilindro [raio, altura] (troncos, colunas)
@@ -15,12 +18,18 @@ const COLLIDE := {
 	"boulder_b": "convex", "mesa": "trimesh", "arch": "trimesh", "arch_giant": "trimesh", "arch_twin": "trimesh",
 	"rock_ring": "trimesh", "rock_fin": "convex", "butte": "convex", "pillar": [1.3, 13.0], "tower_pod": "convex",
 	"tree_acacia": [0.6, 6.0], "tree_acacia_b": [0.5, 5.0], "tree_mushroom": [1.1, 12.0],
-	"crystals_cyan": [2.2, 4.0], "crystals_mag": [2.2, 4.0], "ruin_column": [1.6, 12.0], "ruin_wall": "trimesh",
-	"ruin_tower": [9.5, 70.0],
+	"crystals_cyan": [2.2, 4.0], "crystals_mag": [2.2, 4.0], "crystals_cyan_big": "convex", "crystals_mag_big": "convex",
+	"ruin_column": [1.6, 12.0], "ruin_wall": "trimesh", "ruin_tower": [9.5, 70.0],
+	"cactus": [0.8, 7.0], "palm": [0.6, 7.0], "pine": [0.7, 8.0], "tree_giant": [3.8, 30.0], "dead_tree": [0.5, 8.0],
+	"colosso_estatua": "trimesh", "colosso_costelas": "trimesh", "colosso_nave": "trimesh",
 }
 const VIS_RANGE := {"butte": 4200.0, "mesa": 3400.0, "arch_giant": 3400.0, "arch_twin": 2800.0, "rock_ring": 2600.0,
 	"rock_fin": 3000.0, "ruin_tower": 4200.0, "arch": 2400.0, "rock_spire_c": 2600.0, "rock_spire_a": 2200.0,
-	"tower_pod": 1800.0}
+	"tower_pod": 1800.0, "tree_giant": 2600.0, "crystals_cyan_big": 1800.0, "crystals_mag_big": 1800.0,
+	"bush": 700.0, "cactus": 1000.0, "dead_tree": 1000.0}
+# pedras baixas, cristais pequenos: passa-se por cima (não são obstáculos)
+const RIDE_OVER := ["boulder_a", "boulder_b", "crystals_cyan", "crystals_mag", "pebbles"]
+const COLOSSAL_VIS := 14000.0     # as estruturas colossais vêem-se até 14 km
 const LEVEL_COLORS := {0: Color("#52f2ff"), 1: Color("#ff8a3d"), 2: Color("#ffd23d"), 3: Color("#ffffff")}
 
 var info: Dictionary
@@ -30,37 +39,52 @@ var rock_mat: ShaderMaterial
 var rock_mat_dark: ShaderMaterial
 var checkpoints: Array = []      # [{pos, dir, w, node, column}]
 var player: Node3D
-var tunnel_boxes: Array = []     # [{origin, fwd, len, floor, top}]
-var roof_pos := Vector3.ZERO
-var roof_dir := Vector2.ZERO
+var cave_boxes: Array = []       # [{origin, fwd, len, half_w, top}] túneis e tetos (para o som e a luz)
+var spawn_points: Array = []     # [[Vector3, Vector2 direção]] pontos dos caminhos (renascer / viajar no mapa)
+var _bodies: Array = []          # RIDs no servidor de física
 var _warm: Node3D
 var _warm_frames := 0
+var _space: RID
 
 func setup(map_info: Dictionary, t: Node) -> void:
 	info = map_info
 	terrain = t
+	_space = get_world_3d().space
 	rock_mat = ShaderMaterial.new()
 	rock_mat.shader = preload("res://shaders/rock.gdshader")
 	terrain.apply_biome(rock_mat, info)
 	rock_mat_dark = rock_mat.duplicate()
 	rock_mat_dark.set_shader_parameter("darken", 0.75)
+	var t0 := Time.get_ticks_msec()
 	_place_props()
+	var t1 := Time.get_ticks_msec()
 	_place_set_pieces()
 	_place_water()
 	_place_islands()
-	_place_grass()
+	var t2 := Time.get_ticks_msec()
+	_place_cover()
 	_place_banners()
+	_place_herds()
+	_place_colossi()
 	_place_checkpoints()
 	_place_route_posts()
+	print("mapa: peças %d ms, cenário %d ms, resto %d ms" % [t1 - t0, t2 - t1, Time.get_ticks_msec() - t2])
+
+func _exit_tree() -> void:
+	for b in _bodies:
+		PhysicsServer3D.free_rid(b)
+	_bodies.clear()
 
 # ------------------------------------------------------------------ peças do Blender
 func _prop(name: String) -> Dictionary:
 	if props.has(name):
 		return props[name]
-	var scene: PackedScene = load("res://assets/models/%s.glb" % name)
+	var scene: PackedScene = load("res://assets/models/%s.glb" % name.trim_suffix("_big"))
 	var inst := scene.instantiate()
 	var mesh: Mesh = _find_mesh(inst).mesh
 	inst.free()
+	if props.has(name.trim_suffix("_big")):
+		mesh = props[name.trim_suffix("_big")].mesh
 	var shape: Shape3D = null
 	var c = COLLIDE.get(name, "")
 	if c is Array:
@@ -77,7 +101,7 @@ func _prop(name: String) -> Dictionary:
 		if m is StandardMaterial3D:
 			(m as StandardMaterial3D).vertex_color_use_as_albedo = true
 			(m as StandardMaterial3D).specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	props[name] = {"mesh": mesh, "shape": shape, "cyl": c is Array}
+	props[name] = {"mesh": mesh, "shape": shape, "cyl": c is Array, "h": (c[1] if c is Array else 0.0)}
 	return props[name]
 
 func _find_mesh(n: Node) -> MeshInstance3D:
@@ -92,12 +116,14 @@ func _find_mesh(n: Node) -> MeshInstance3D:
 func _xf(pos: Vector3, yaw: float, s: float) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * s), pos)
 
-func _shape_xf(name: String, t: Transform3D) -> Transform3D:
-	# cilindros: centro a meia altura (o modelo nasce no chão)
-	if props[name].cyl:
-		var c: Array = COLLIDE[name]
-		return t * Transform3D(Basis(), Vector3(0, c[1] * 0.5, 0))
-	return t
+func _new_body(layer: int) -> RID:
+	var b := PhysicsServer3D.body_create()
+	PhysicsServer3D.body_set_mode(b, PhysicsServer3D.BODY_MODE_STATIC)
+	PhysicsServer3D.body_set_collision_layer(b, layer)
+	PhysicsServer3D.body_set_collision_mask(b, 0)
+	PhysicsServer3D.body_set_space(b, _space)
+	_bodies.append(b)
+	return b
 
 func _place_props() -> void:
 	var groups := {}
@@ -110,35 +136,53 @@ func _place_props() -> void:
 		groups.get_or_add(key, {}).get_or_add(name, []).append(t)
 		var P := _prop(name)
 		if P.shape:
-			if not bodies.has(key):
-				var b := StaticBody3D.new()
-				add_child(b)
-				bodies[key] = b
-			var cs := CollisionShape3D.new()
-			cs.shape = P.shape
-			cs.transform = _shape_xf(name, t)
-			bodies[key].add_child(cs)
+			# pedras baixas e cristais pequenos ficam na camada 2: o veículo passa por cima
+			var soft: bool = name in RIDE_OVER
+			var bkey := Vector3i(key.x, key.y, 1 if soft else 0)
+			if not bodies.has(bkey):
+				bodies[bkey] = _new_body(2 if soft else 1)
+			# cilindros: centro a meia altura (o modelo nasce no chão)
+			var st := t * Transform3D(Basis(), Vector3(0, P.h * 0.5, 0)) if P.cyl else t
+			PhysicsServer3D.body_add_shape(bodies[bkey], P.shape.get_rid(), st)
 	for key in groups:
 		for name in groups[key]:
 			_multimesh(props[name].mesh, groups[key][name], rock_mat if name in ROCK_PROPS else null,
 				VIS_RANGE.get(name, 1500.0), true)
 
+## MultiMesh com alcance de visão contado a partir do centro do grupo (mais o raio do grupo).
 func _multimesh(mesh: Mesh, xs: Array, mat: Material, vis: float, shadows: bool) -> MultiMeshInstance3D:
+	var c := Vector3.ZERO
+	for x in xs:
+		c += x.origin
+	c /= maxf(1.0, xs.size())
+	var rad := 0.0
+	for x in xs:
+		rad = maxf(rad, Vector2(x.origin.x - c.x, x.origin.z - c.z).length())
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
 	mm.instance_count = xs.size()
 	for i in xs.size():
-		mm.set_instance_transform(i, xs[i])
+		mm.set_instance_transform(i, Transform3D(xs[i].basis, xs[i].origin - c))
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
+	mmi.position = c
 	if mat:
 		mmi.material_override = mat
-	mmi.visibility_range_end = vis
+	mmi.visibility_range_end = vis + rad
+	mmi.visibility_range_end_margin = 40.0
 	if not shadows:
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 	return mmi
+
+## Vários MultiMesh, um por quadrado do mapa (para o alcance de visão funcionar bem).
+func _grouped(mesh: Mesh, xs: Array, group: float, vis: float, mat: Material = null, shadows := false) -> void:
+	var g := {}
+	for x in xs:
+		g.get_or_add(Vector2i(floori(x.origin.x / group), floori(x.origin.z / group)), []).append(x)
+	for k in g:
+		_multimesh(mesh, g[k], mat, vis, shadows)
 
 func _place_static(name: String, xf: Transform3D, mat: Material, double_shadow := false) -> MeshInstance3D:
 	var P := _prop(name)
@@ -149,23 +193,21 @@ func _place_static(name: String, xf: Transform3D, mat: Material, double_shadow :
 		mi.material_override = mat
 	if double_shadow:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED   # tetos fazem sombra por dentro
+	mi.visibility_range_end = 5200.0
 	add_child(mi)
 	var shape: Shape3D = P.shape if P.shape else P.mesh.create_trimesh_shape()
-	var b := StaticBody3D.new()
-	var cs := CollisionShape3D.new()
-	cs.shape = shape
-	b.transform = xf
-	b.add_child(cs)
-	add_child(b)
+	PhysicsServer3D.body_add_shape(_new_body(1), shape.get_rid(), xf)
 	return mi
 
+func _cave(origin: Vector3, yaw: float, length: float, half_w: float, top: float) -> void:
+	cave_boxes.append({"origin": origin, "fwd": Vector3(-sin(yaw), 0.0, -cos(yaw)), "len": length, "half_w": half_w, "top": top})
+
 func _place_set_pieces() -> void:
-	# túneis (feitos à medida no Blender)
+	# túneis (feitos à medida no Blender: a tampa segue o terreno por cima)
 	for t in info.tunnels:
 		var pos := Vector3(t.p[0], t.p[1], t.p[2])
 		_place_static(t.name, Transform3D(Basis(Vector3.UP, t.yaw), pos), rock_mat, true)
-		var fwd := Vector3(-sin(t.yaw), 0.0, -cos(t.yaw))
-		tunnel_boxes.append({"origin": pos, "fwd": fwd, "len": float(t.len), "floor": pos.y, "top": pos.y + float(t.height)})
+		_cave(pos, t.yaw, float(t.len), 19.0, pos.y + 16.0)
 	# pontes de pedra
 	for b in info.bridges:
 		_place_static(b.name, Transform3D(Basis(Vector3.UP, b.yaw), Vector3(b.p[0], b.p[1], b.p[2])), rock_mat)
@@ -173,25 +215,23 @@ func _place_set_pieces() -> void:
 	for a in info.aqueducts:
 		var P := _prop("aqueduct_seg")
 		var seg_shape: Shape3D = P.mesh.create_trimesh_shape()
+		props["aqueduct_seg"].shape = seg_shape
 		var fwd := Vector3(-sin(a.yaw), 0.0, -cos(a.yaw))
 		var xs: Array = []
-		var body := StaticBody3D.new()
-		add_child(body)
+		var body := _new_body(1)
 		for i in int(a.n):
 			if i in a.missing:
 				continue
 			var xf := Transform3D(Basis(Vector3.UP, a.yaw), Vector3(a.p[0], a.p[1], a.p[2]) + fwd * (i * float(a.seg)))
 			xs.append(xf)
-			var cs := CollisionShape3D.new()
-			cs.shape = seg_shape
-			cs.transform = xf
-			body.add_child(cs)
+			PhysicsServer3D.body_add_shape(body, seg_shape.get_rid(), xf)
 		_multimesh(P.mesh, xs, null, 3400.0, true)
-	# teto de pedra sobre a fenda vermelha (vira caverna)
-	var r: Dictionary = info.roof
-	roof_pos = Vector3(r.p[0], r.p[1], r.p[2])
-	roof_dir = Vector2(-sin(r.yaw), -cos(r.yaw))
-	_place_static("canyon_roof", _xf(roof_pos - Vector3(roof_dir.x, 0, roof_dir.y) * 90.0, r.yaw, 1.0), rock_mat_dark, true)
+	# tetos de pedra sobre as fendas (viram caverna)
+	for r in info.roofs:
+		var rp := Vector3(r.p[0], r.p[1], r.p[2])
+		var fwd := Vector3(-sin(r.yaw), 0.0, -cos(r.yaw))
+		_place_static("canyon_roof", _xf(rp - fwd * 90.0, r.yaw, 1.0), rock_mat_dark, true)
+		_cave(rp - fwd * 90.0, r.yaw, 180.0, 40.0, rp.y + 24.0)
 	# portais de largada e chegada (arco largo por cima da estrada)
 	for spec in [[info.start, "LARGADA", 30.0], [info.finish, "META", 0.0]]:
 		var d: Dictionary = spec[0]
@@ -202,17 +242,14 @@ func _place_set_pieces() -> void:
 		gm.mesh = _prop("gate").mesh
 		gm.transform = Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3(7.6, 3.6, 3.6)), pos)
 		add_child(gm)
-		var gb := StaticBody3D.new()
-		add_child(gb)
+		var gb := _new_body(1)
 		var side := Vector3(-dir.z, 0, dir.x)
+		var cyl := CylinderShape3D.new()
+		cyl.radius = 6.0
+		cyl.height = 40.0
+		props["_gate_leg"] = {"shape": cyl}
 		for sg in [-1.0, 1.0]:
-			var cs := CollisionShape3D.new()
-			var cyl := CylinderShape3D.new()
-			cyl.radius = 6.0
-			cyl.height = 40.0
-			cs.shape = cyl
-			cs.position = pos + side * sg * 47.0 + Vector3(0, 20, 0)
-			gb.add_child(cs)
+			PhysicsServer3D.body_add_shape(gb, cyl.get_rid(), Transform3D(Basis(), pos + side * sg * 47.0 + Vector3(0, 20, 0)))
 		var lbl := Label3D.new()
 		lbl.text = spec[1]
 		lbl.font_size = 512
@@ -222,46 +259,52 @@ func _place_set_pieces() -> void:
 		lbl.outline_modulate = Color("#3a1d10")
 		lbl.position = pos + Vector3(0, 58, 0)
 		lbl.rotation.y = yaw
+		lbl.visibility_range_end = 2500.0
 		add_child(lbl)
 	var fin: Dictionary = info.finish
 	_add_trigger(Vector3(fin.p[0], fin.p[1], fin.p[2]), Vector2(fin.dir[0], fin.dir[1]), float(fin.w), -1)
 
-## Dentro de um túnel ou debaixo do teto de pedra (eco no som, luz mais baixa).
+## Dentro de um túnel ou debaixo de um teto de pedra (eco no som, luz mais baixa).
 func in_cave(p: Vector3) -> bool:
-	for t in tunnel_boxes:
+	for t in cave_boxes:
 		var rel: Vector3 = p - t.origin
+		if rel.length_squared() > (t.len + 60.0) * (t.len + 60.0):
+			continue
 		var a: float = rel.dot(t.fwd)
-		if a > 0.0 and a < t.len and p.y < t.floor + 16.0:
+		if a > 0.0 and a < t.len and p.y < t.top:
 			var side := Vector3(-t.fwd.z, 0, t.fwd.x)
-			if absf(rel.dot(side)) < 19.0:
+			if absf(rel.dot(side)) < t.half_w:
 				return true
-	var rel2 := Vector2(p.x - roof_pos.x, p.z - roof_pos.z)
-	return absf(rel2.dot(roof_dir)) < 90.0 and absf(rel2.dot(Vector2(-roof_dir.y, roof_dir.x))) < 40.0 and p.y < roof_pos.y + 24.0
+	return false
 
 # ------------------------------------------------------------------ água, ilhas, relva, bandeirolas
 func _place_water() -> void:
 	var wmat := ShaderMaterial.new()
 	wmat.shader = preload("res://shaders/water.gdshader")
-	for lk in info.lakes:
-		var r := float(lk.r)
+	for w in info.waters:
+		var sx := float(w.sx) * 2.0
+		var sz := float(w.sz) * 2.0
 		var pm := PlaneMesh.new()
-		pm.size = Vector2(r * 2.0, r * 2.0)
-		pm.subdivide_width = 8
-		pm.subdivide_depth = 8
+		pm.size = Vector2(sx, sz)
+		pm.subdivide_width = clampi(int(sx / 120.0), 2, 24)
+		pm.subdivide_depth = clampi(int(sz / 120.0), 2, 24)
 		pm.material = wmat
+		var xf := Transform3D(Basis(Vector3.UP, float(w.yaw)), Vector3(w.c[0], float(w.y), w.c[1]))
 		var mi := MeshInstance3D.new()
 		mi.mesh = pm
-		mi.position = Vector3(lk.c[0], float(lk.y), lk.c[1])
+		mi.transform = xf
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visibility_range_end = 6000.0
 		add_child(mi)
 		# superfície "dura": o veículo flutua sobre a água
 		var body := StaticBody3D.new()
 		body.set_meta("water", true)
+		body.transform = xf
 		var cs := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = Vector3(r * 2.0, 2.0, r * 2.0)
+		box.size = Vector3(sx, 2.0, sz)
 		cs.shape = box
-		cs.position = Vector3(lk.c[0], float(lk.y) - 1.0, lk.c[1])
+		cs.position = Vector3(0, -1.0, 0)
 		body.add_child(cs)
 		add_child(body)
 
@@ -269,18 +312,14 @@ func _place_islands() -> void:
 	var xs: Array = []
 	for i in info.islands:
 		xs.append(_xf(Vector3(i[0], i[1], i[2]), i[3], i[4]))
-	var mmi := _multimesh(_prop("float_island").mesh, xs, null, 6000.0, false)
-	mmi.extra_cull_margin = 50.0
+	_grouped(_prop("float_island").mesh, xs, 4096.0, 6000.0)
 
-func _place_grass() -> void:
-	var groups := {}
-	for g in info.grass:
-		var key := Vector2i(floori(g[0] / CELL_GROUP), floori(g[2] / CELL_GROUP))
-		groups.get_or_add(key, []).append(_xf(Vector3(g[0], g[1], g[2]), g[3], g[4]))
-	var mesh: Mesh = _prop("grass_tuft").mesh
-	for key in groups:
-		var mmi := _multimesh(mesh, groups[key], null, 320.0, false)
-		mmi.visibility_range_end_margin = 40.0
+func _place_cover() -> void:
+	for spec in [["grass_tuft", "grass", 300.0], ["flowers", "flowers", 260.0], ["fern", "ferns", 280.0]]:
+		var xs: Array = []
+		for g in info[spec[1]]:
+			xs.append(_xf(Vector3(g[0], g[1], g[2]), g[3], g[4]))
+		_grouped(_prop(spec[0]).mesh, xs, COVER_GROUP, spec[2])
 
 func _place_banners() -> void:
 	# bandeirolas penduradas entre dois postes, por cima da estrada (como nas imagens)
@@ -289,36 +328,96 @@ func _place_banners() -> void:
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	var colors := [Color("#e5483a"), Color("#ffd23d"), Color("#3fb6e6"), Color("#f4eee2"), Color("#7ac25a")]
+	var meshes := {}
+	var xs := {}
 	for b in info.banners:
-		var span := float(b[4])
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		var top := 22.0
-		var n := int(span / 4.0)
-		for k in n:
-			var x0 := -span * 0.5 + k * span / n
-			var x1 := x0 + span / n * 0.8
-			var sag0 := top - 5.0 * (1.0 - pow(2.0 * (x0 / span), 2.0))
-			var sag1 := top - 5.0 * (1.0 - pow(2.0 * (x1 / span), 2.0))
-			st.set_color(colors[k % colors.size()])
-			st.add_vertex(Vector3(x0, sag0, 0))
-			st.add_vertex(Vector3(x1, sag1, 0))
-			st.add_vertex(Vector3((x0 + x1) * 0.5, (sag0 + sag1) * 0.5 - 2.6, 0))
-		for sg in [-1.0, 1.0]:  # postes
-			var px: float = sg * span * 0.5
-			for q in [[Vector3(px - 0.35, 0, 0), Vector3(px + 0.35, 0, 0), Vector3(px + 0.25, top + 1.0, 0), Vector3(px - 0.25, top + 1.0, 0)],
-					[Vector3(px, 0, -0.35), Vector3(px, 0, 0.35), Vector3(px, top + 1.0, 0.25), Vector3(px, top + 1.0, -0.25)]]:
-				st.set_color(Color("#5a4038"))
-				st.add_vertex(q[0]); st.add_vertex(q[1]); st.add_vertex(q[2])
-				st.add_vertex(q[0]); st.add_vertex(q[2]); st.add_vertex(q[3])
-		st.generate_normals()
+		var span := snappedf(float(b[4]), 10.0)
+		if not meshes.has(span):
+			meshes[span] = _banner_mesh(span, colors, mat)
+			xs[span] = []
+		xs[span].append(Transform3D(Basis(Vector3.UP, float(b[3])), Vector3(b[0], float(b[1]) - 0.5, b[2])))
+	for span in meshes:
+		_grouped(meshes[span], xs[span], CELL_GROUP, 1600.0)
+
+func _banner_mesh(span: float, colors: Array, mat: Material) -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var top := 22.0
+	var n := int(span / 4.0)
+	for k in n:
+		var x0 := -span * 0.5 + k * span / n
+		var x1 := x0 + span / n * 0.8
+		var sag0 := top - 5.0 * (1.0 - pow(2.0 * (x0 / span), 2.0))
+		var sag1 := top - 5.0 * (1.0 - pow(2.0 * (x1 / span), 2.0))
+		st.set_color(colors[k % colors.size()])
+		st.add_vertex(Vector3(x0, sag0, 0))
+		st.add_vertex(Vector3(x1, sag1, 0))
+		st.add_vertex(Vector3((x0 + x1) * 0.5, (sag0 + sag1) * 0.5 - 2.6, 0))
+	for sg in [-1.0, 1.0]:  # postes
+		var px: float = sg * span * 0.5
+		for q in [[Vector3(px - 0.35, 0, 0), Vector3(px + 0.35, 0, 0), Vector3(px + 0.25, top + 1.0, 0), Vector3(px - 0.25, top + 1.0, 0)],
+				[Vector3(px, 0, -0.35), Vector3(px, 0, 0.35), Vector3(px, top + 1.0, 0.25), Vector3(px, top + 1.0, -0.25)]]:
+			st.set_color(Color("#5a4038"))
+			st.add_vertex(q[0]); st.add_vertex(q[1]); st.add_vertex(q[2])
+			st.add_vertex(q[0]); st.add_vertex(q[2]); st.add_vertex(q[3])
+	st.generate_normals()
+	st.set_material(mat)
+	return st.commit()
+
+# ------------------------------------------------------------------ manadas (estáticas)
+func _place_herds() -> void:
+	var by_kind := {}
+	for h in info.herds:
+		by_kind.get_or_add(String(h[0]), []).append(_xf(Vector3(h[1], h[2], h[3]), h[4], h[5]))
+	for kind in by_kind:
+		_grouped(_prop(kind).mesh, by_kind[kind], CELL_GROUP, 1300.0, null, true)
+
+# ------------------------------------------------------------------ estruturas colossais
+## Materiais com a neblina leve das estruturas colossais (vêem-se a sair do horizonte).
+func _far_fog(m: ShaderMaterial) -> void:
+	var env: Environment = get_world_3d().environment
+	if env:
+		m.set_shader_parameter("fog_col", env.fog_light_color)
+
+func _colossal_mesh(name: String, cache: Dictionary) -> Mesh:
+	if cache.has(name):
+		return cache[name]
+	var mesh: Mesh = _prop(name).mesh.duplicate()
+	for i in mesh.get_surface_count():
+		var m := ShaderMaterial.new()
+		m.shader = preload("res://shaders/colossal.gdshader")
+		_far_fog(m)
+		var src := mesh.surface_get_material(i)
+		if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:
+			m.set_shader_parameter("emit_color", (src as StandardMaterial3D).emission)
+			m.set_shader_parameter("emit", (src as StandardMaterial3D).emission_energy_multiplier)
+		mesh.surface_set_material(i, m)
+	cache[name] = mesh
+	return mesh
+
+func _place_colossi() -> void:
+	var rock_far := ShaderMaterial.new()
+	rock_far.shader = preload("res://shaders/rock_far.gdshader")
+	terrain.apply_biome(rock_far, info)
+	_far_fog(rock_far)
+	var cache := {}
+	for c in info.get("colossi", []):
+		var name: String = c[0]
+		var xf := _xf(Vector3(c[1], c[2], c[3]), c[4], c[5])
+		var P := _prop(name)
 		var mi := MeshInstance3D.new()
-		mi.mesh = st.commit()
-		mi.material_override = mat
-		mi.transform = Transform3D(Basis(Vector3.UP, float(b[3])), Vector3(b[0], float(b[1]) - 0.5, b[2]))
-		mi.visibility_range_end = 1600.0
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if name in ROCK_PROPS:
+			mi.mesh = P.mesh
+			mi.material_override = rock_far
+		else:
+			mi.mesh = _colossal_mesh(name, cache)
+		mi.transform = xf
+		mi.visibility_range_end = COLOSSAL_VIS
+		mi.extra_cull_margin = 20.0
 		add_child(mi)
+		if P.shape and name != "float_island":
+			var st: Transform3D = xf * Transform3D(Basis(), Vector3(0, P.h * 0.5, 0)) if P.cyl else xf
+			PhysicsServer3D.body_add_shape(_new_body(1), P.shape.get_rid(), st)
 
 # ------------------------------------------------------------------ portões
 func _add_trigger(pos: Vector3, dir: Vector2, w: float, index: int) -> Area3D:
@@ -372,6 +471,7 @@ func _place_checkpoints() -> void:
 			var mi := MeshInstance3D.new()
 			mi.mesh = pylon
 			mi.position = pos + side * sg * w * 0.5 + Vector3(0, 20, 0)
+			mi.visibility_range_end = 3000.0
 			node.add_child(mi)
 			var lamp := MeshInstance3D.new()
 			var bm := BoxMesh.new()
@@ -379,6 +479,7 @@ func _place_checkpoints() -> void:
 			bm.material = light_mat
 			lamp.mesh = bm
 			lamp.position = mi.position + Vector3(0, 23, 0)
+			lamp.visibility_range_end = 3000.0
 			node.add_child(lamp)
 		var beam := MeshInstance3D.new()
 		var bb := BoxMesh.new()
@@ -387,7 +488,19 @@ func _place_checkpoints() -> void:
 		beam.mesh = bb
 		beam.position = pos + Vector3(0, 43, 0)
 		beam.rotation.y = atan2(-dir.x, -dir.y)
+		beam.visibility_range_end = 3000.0
 		node.add_child(beam)
+		var lbl := Label3D.new()
+		lbl.text = String(c.get("name", ""))
+		lbl.font_size = 256
+		lbl.pixel_size = 0.04
+		lbl.outline_size = 32
+		lbl.modulate = Color("#fff1d6")
+		lbl.outline_modulate = Color("#2a1a10")
+		lbl.position = pos + Vector3(0, 52, 0)
+		lbl.rotation.y = beam.rotation.y
+		lbl.visibility_range_end = 1200.0
+		node.add_child(lbl)
 		var column := MeshInstance3D.new()
 		var cm := CylinderMesh.new()
 		cm.top_radius = 9.0
@@ -402,10 +515,12 @@ func _place_checkpoints() -> void:
 		_add_trigger(pos, dir, float(c.w), i)
 		checkpoints.append({"pos": pos, "dir": dir, "w": c.w, "node": node, "column": column})
 
+## Circuito: só o próximo portão tem a coluna de luz; os já passados desaparecem.
+## Exploração (next_index < 0): todos os portões ficam, sem colunas.
 func highlight(next_index: int) -> void:
 	for i in checkpoints.size():
 		checkpoints[i].column.visible = i == next_index
-		checkpoints[i].node.visible = i >= next_index
+		checkpoints[i].node.visible = next_index < 0 or i >= next_index
 
 # ------------------------------------------------------------------ balizas ao longo de cada caminho (cor = nível)
 func _place_route_posts() -> void:
@@ -414,6 +529,10 @@ func _place_route_posts() -> void:
 		for v in sec.variants:
 			var route: Array = v.route
 			var lvl := int(v.level)
+			for k in range(2, route.size() - 1, 3):   # pontos para renascer / viajar
+				var a: Array = route[k]
+				var b: Array = route[k + 1]
+				spawn_points.append([Vector3(a[0], a[1], a[2]), Vector2(b[0] - a[0], b[2] - a[2]).normalized(), lvl])
 			var off := float(v.hw) + 4.0
 			for k in range(8, route.size() - 8, 15):
 				var a: Array = route[k]
@@ -442,7 +561,34 @@ func _place_route_posts() -> void:
 		mat.emission = LEVEL_COLORS[lvl]
 		mat.emission_energy_multiplier = 0.9 if lvl == 0 else 0.5
 		mesh.material = mat
-		_multimesh(mesh, by_level[lvl], null, 900.0, false)
+		_grouped(mesh, by_level[lvl], CELL_GROUP, 900.0)
+
+## Ponto de caminho mais perto: em 3D (renascer depois de cair) ou só no plano, fora dos
+## túneis (viajar para um sítio tocado no mapa).
+func nearest_spawn(p: Vector3, flat := false) -> Array:
+	var best: Array = []
+	var bd := INF
+	for s in spawn_points:
+		var q: Vector3 = s[0]
+		var d := Vector2(q.x - p.x, q.z - p.z).length_squared()
+		if not flat:
+			d += 9.0 * (q.y - p.y) * (q.y - p.y)
+		if d < bd and not (flat and in_cave(q + Vector3(0, 2, 0))):
+			bd = d
+			best = s
+	return best
+
+## Zona do mundo (índice em info.zones) onde está o ponto.
+func zone_at(p: Vector3) -> int:
+	var best := 0
+	var bd := INF
+	for i in info.zones.size():
+		var c: Array = info.zones[i].c
+		var d := maxf(absf(p.x - c[0]), absf(p.z - c[1]))
+		if d < bd:
+			bd = d
+			best = i
+	return best
 
 # ------------------------------------------------------------------ aquecer os shaders (evita engasgos na 1ª vez que algo aparece)
 func warmup(cam: Camera3D) -> void:
@@ -450,7 +596,8 @@ func warmup(cam: Camera3D) -> void:
 	cam.add_child(_warm)
 	var meshes: Array = []
 	for name in props:
-		meshes.append([props[name].mesh, rock_mat if name in ROCK_PROPS else null])
+		if props[name].has("mesh"):
+			meshes.append([props[name].mesh, rock_mat if name in ROCK_PROPS else null])
 	var k := 0
 	for m in meshes:
 		var mi := MeshInstance3D.new()

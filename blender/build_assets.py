@@ -50,6 +50,21 @@ PAL = {
     'p_dark': {'c': '#26262c', 'r': 0.6}, 'p_cream': {'c': '#e8dcc6', 'r': 0.6},
     'p_beam': {'c': '#ffb0f0', 'e': '#ff4fd8', 's': 5.0, 'r': 0.3}, 'p_fire': {'c': '#ffd8a0', 'e': '#ffa040', 's': 5.0, 'r': 0.3},
     'rock': {'c': '#c99a68'}, 'rock_dark': {'c': '#8a5a3c'},
+    # flora e fauna
+    'cactus': {'c': '#5f9a4f'}, 'cactus_dark': {'c': '#3f7440'}, 'flower_pink': {'c': '#ff7fb5'}, 'flower_yellow': {'c': '#ffd84a'},
+    'flower_white': {'c': '#fff6e8'}, 'flower_violet': {'c': '#a77bff'}, 'flower_red': {'c': '#ff5a4a'},
+    'palm_trunk': {'c': '#9a7350'}, 'palm_leaf': {'c': '#4f9a45'}, 'palm_leaf_light': {'c': '#7cc25a'},
+    'pine': {'c': '#2f6a45'}, 'pine_light': {'c': '#4f8a55'}, 'bark': {'c': '#6a4a36'}, 'bark_grey': {'c': '#8a8278'},
+    'giant_leaf': {'c': '#3f8a4a'}, 'giant_leaf_light': {'c': '#6fbf5a'}, 'giant_leaf_dark': {'c': '#245a3a'},
+    'fern': {'c': '#4a9a4a'}, 'hide_tan': {'c': '#c79a62'}, 'hide_brown': {'c': '#7a5236'}, 'hide_cream': {'c': '#ead9b8'},
+    'hide_stripe': {'c': '#4a3226'}, 'horn': {'c': '#e8e0cc'}, 'bird_white': {'c': '#f4f1ea'}, 'bird_grey': {'c': '#9aa3ad'},
+    'bird_tip': {'c': '#2a2d36'}, 'manta_top': {'c': '#2e4a7a'}, 'manta_belly': {'c': '#cfe6ff'},
+    'manta_glow': {'c': '#9ffcff', 'e': '#52f2ff', 's': 2.2},
+    # colossos
+    'stone_light': {'c': '#e2d6bc'}, 'stone': {'c': '#c4b494'}, 'stone_dark': {'c': '#8f7f66'}, 'stone_eye': {'c': '#3c3228'},
+    'bone': {'c': '#efe5cc'}, 'bone_dark': {'c': '#c9b994'}, 'bone_socket': {'c': '#3a2c22'},
+    'hull': {'c': '#9ba2aa'}, 'hull_dark': {'c': '#5d646e'}, 'hull_light': {'c': '#c8cdd2'}, 'hull_rust': {'c': '#8c5c46'},
+    'ship_light': {'c': '#ffe2a8', 'e': '#ffb55a', 's': 2.5},
     # veículo
     'v_white': {'c': '#f4eee2', 'r': 0.5}, 'v_red': {'c': '#e5483a', 'r': 0.5}, 'v_navy': {'c': '#272b47', 'r': 0.6},
     'v_glass': {'c': '#1d4558', 'r': 0.1}, 'v_helmet': {'c': '#ff9d2e', 'r': 0.4},
@@ -693,44 +708,46 @@ def make_faisca(name):
 
 
 # ------------------------------------------------------------------ peças do mapa grande (túneis, pontes, aqueduto, ruínas)
-def make_tunnel(name, L, Hl, W=84.0):
-    """Bloco de túnel: tampa plana a Hl (por cima passa-se de carro), túnel de 36 m de largura por baixo.
-    Chão aberto em z=0 (o chão é o terreno), ao longo de +Y desde a origem."""
+def make_tunnel(name, L, tops, step=24.0, W=84.0):
+    """Bloco de túnel: a tampa segue o perfil 'tops' (alturas acima do chão do túnel, de step em step metros),
+    por cima passa-se de carro; túnel de 36 m de largura por baixo. Chão aberto em z=0, ao longo de +Y."""
     m = Mesh(name)
     THW, TWALL, TARCH = 18.0, 11.0, 7.0
     BOT = -3.0
-    def top(x, y): return Hl + 0.4 * noise.noise(Vector((x * 0.05, y * 0.05, 1.3)))
+    def prof(y):
+        f = min(max(y / step, 0.0), len(tops) - 1.0001); i = int(f); t = f - i
+        return tops[i] * (1 - t) + tops[min(i + 1, len(tops) - 1)] * t
+    def top(x, y): return prof(y) + 0.4 * noise.noise(Vector((x * 0.05, y * 0.05, 1.3)))
     def atop(x): return TWALL + TARCH * math.sqrt(max(0.0, 1 - (x / THW) ** 2))
     def band(z): return BANDS[int((z + 40) / 6.5) % 4]
-    n_y = max(8, int(L / 12)); ys = [i * L / n_y for i in range(n_y + 1)]
-    us = [i / 10.0 - 1 for i in range(21)]
+    n_y = max(6, int(L / step)); ys = [i * L / n_y for i in range(n_y + 1)]
+    us = [i / 5.0 - 1 for i in range(11)]
     grid = [[m.bm.verts.new((u * W / 2, y, top(u * W / 2, y))) for u in us] for y in ys]
     for j in range(len(ys) - 1):
         for i in range(len(us) - 1):
             f = m.bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i])); f.normal_update()
             if f.normal.z < 0: f.normal_flip()
             f.material_index = m.mi('moss')
-    for sx in (-1, 1):  # paredes de fora (ficam enterradas no terreno)
+    for sx in (-1, 1):
         for y0, y1 in zip(ys, ys[1:]):
             x = sx * W / 2
             m.face('rock_dark', [(x, y0, BOT), (x, y1, BOT), (x, y1, top(x, y1)), (x, y0, top(x, y0))], want=(sx, 0, 0))
-    ts = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-    for yf, sg in ((0.0, -1), (L, 1)):  # bocas do túnel
-        cols_l = [-W / 2 + (W / 2 - THW) * i / 6 for i in range(7)]
-        cols_in = [-THW + i * 1.5 for i in range(25)]
-        cols_r = [THW + (W / 2 - THW) * i / 6 for i in range(7)]
+    ts = [0, 0.25, 0.5, 0.75, 1.0]
+    cols_in = [-THW + i * 3.0 for i in range(13)]
+    for yf, sg in ((0.0, -1), (L, 1)):
+        cols_l = [-W / 2 + (W / 2 - THW) * i / 3 for i in range(4)]
+        cols_r = [THW + (W / 2 - THW) * i / 3 for i in range(4)]
         for group, zb in ((cols_l, lambda x: BOT), (cols_in, atop), (cols_r, lambda x: BOT)):
             for a, b in zip(group, group[1:]):
                 Ha, Hb = top(a, yf), top(b, yf)
                 for t0, t1 in zip(ts, ts[1:]):
                     za0, za1 = lerp(zb(a), Ha, t0), lerp(zb(a), Ha, t1); zb0, zb1 = lerp(zb(b), Hb, t0), lerp(zb(b), Hb, t1)
                     m.face(band((za0 + za1 + zb0 + zb1) / 4), [(a, yf, za0), (b, yf, zb0), (b, yf, zb1), (a, yf, za1)], want=(0, sg, 0))
-        # moldura de pedra clara à volta da boca
         for a, b in zip(cols_in, cols_in[1:]):
             za, zb_ = atop(a), atop(b)
             m.face('cream', [(a, yf + sg * 0.6, za), (b, yf + sg * 0.6, zb_), (b, yf + sg * 0.6, zb_ + 2.2), (a, yf + sg * 0.6, za + 2.2)], want=(0, sg, 0))
-    sec = [(-THW, -1.0), (-THW, TWALL)] + [(x, atop(x)) for x in [-THW + i * 1.5 for i in range(1, 24)]] + [(THW, TWALL), (THW, -1.0)]
-    for y0, y1 in zip(ys, ys[1:]):  # interior
+    sec = [(-THW, -1.0), (-THW, TWALL)] + [(x, atop(x)) for x in cols_in[1:-1]] + [(THW, TWALL), (THW, -1.0)]
+    for y0, y1 in zip(ys, ys[1:]):
         for (xa, za), (xb, zb_) in zip(sec, sec[1:]):
             cx, cz = (xa + xb) / 2, (za + zb_) / 2
             jit = lambda x, z, y: Vector((0.7 * noise.noise(Vector((x * 0.2, y * 0.05, z * 0.2))), 0, 0.5 * noise.noise(Vector((z * 0.2, y * 0.05, x * 0.2)))))
@@ -867,6 +884,330 @@ def make_ruin_tower(name, seed):
         m.sphere('moss_dark', rnd.uniform(1.5, 2.6), T(math.cos(a) * 8.5, math.sin(a) * 8.5, zz) @ S(1, 1, 1.6), u=8, v=6)
     return m.done()
 
+
+# ------------------------------------------------------------------ flora
+def make_cactus(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    h = rnd.uniform(6, 8)
+    m.cone('cactus', 0.75, 0.6, h, T(0, 0, h / 2), segs=10)
+    m.sphere('cactus', 0.6, T(0, 0, h), u=10, v=5)
+    for sx, z0, up in ((-1, h * 0.35, h * 0.35), (1, h * 0.5, h * 0.3)):
+        m.cone('cactus_dark', 0.42, 0.42, 1.6, T(sx * 1.0, 0, z0) @ RY(90), segs=8)
+        m.cone('cactus', 0.42, 0.38, up, T(sx * 1.8, 0, z0 + up / 2), segs=8)
+        m.sphere('flower_pink' if sx > 0 else 'flower_yellow', 0.3, T(sx * 1.8, 0, z0 + up + 0.1), u=6, v=4)
+    m.sphere('flower_white', 0.35, T(0, 0, h + 0.5), u=6, v=4)
+    return m.done()
+
+def make_palm(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    h = rnd.uniform(11, 14); lean = rnd.uniform(0.6, 1.6)
+    pts = []
+    for k in range(9):
+        t = k / 8
+        pts.append(Vector((lean * t * t * 3, 0, h * t)))
+    for k, (a, b) in enumerate(zip(pts, pts[1:])):
+        d = b - a
+        r0 = lerp(0.55, 0.32, k / 8); r1 = lerp(0.55, 0.32, (k + 1) / 8)
+        m.cone('palm_trunk' if k % 2 == 0 else 'bark', r0, r1, d.length, T(*((a + b) / 2)) @ align_z(d), segs=8)
+    top = pts[-1]
+    for k in range(8):   # folhas caídas
+        ang = k * math.tau / 8 + rnd.uniform(-0.2, 0.2)
+        dirv = Vector((math.cos(ang), math.sin(ang), 0))
+        side = Vector((-dirv.y, dirv.x, 0))
+        prev = None
+        for j in range(6):
+            t = j / 5
+            p = top + dirv * (t * 6.5) + Vector((0, 0, 1.2 * math.sin(t * math.pi * 0.8) - t * t * 2.8))
+            w = 1.1 * math.sin(math.pi * min(t + 0.08, 1.0))
+            l, r = p + side * w, p - side * w
+            if prev:
+                m.face('palm_leaf' if j % 2 else 'palm_leaf_light', [prev[0], prev[1], r, l])
+            prev = (l, r)
+    for k in range(3):
+        m.sphere('hide_brown', 0.35, T(top.x + rnd.uniform(-0.4, 0.4), rnd.uniform(-0.4, 0.4), top.z - 0.6), u=6, v=4)
+    return m.done()
+
+def make_bush(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    for k in range(4):
+        r = rnd.uniform(0.9, 1.5)
+        vs = m.ico(rnd.choice(['leaf', 'leaf_light', 'leaf_dark']), r, T(rnd.uniform(-1, 1), rnd.uniform(-1, 1), r * 0.7) @ S(1, 1, 0.8), sub=1)
+        m.jitter(vs, r * 0.15, 0.8, seed + k, radial=False)
+    for k in range(5):
+        m.sphere(rnd.choice(['flower_pink', 'flower_white', 'flower_yellow']), 0.18, T(rnd.uniform(-1.4, 1.4), rnd.uniform(-1.4, 1.4), rnd.uniform(1.2, 1.9)), u=5, v=3)
+    return m.done()
+
+def make_flowers(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    cols = ['flower_pink', 'flower_yellow', 'flower_white', 'flower_violet', 'flower_red']
+    for k in range(9):
+        x, y = rnd.uniform(-0.8, 0.8), rnd.uniform(-0.8, 0.8); h = rnd.uniform(0.35, 0.7)
+        m.face('grass', [(x - 0.03, y, 0), (x + 0.03, y, 0), (x, y, h)])
+        m.ico(rnd.choice(cols), rnd.uniform(0.08, 0.13), T(x, y, h), sub=1)
+    return m.done()
+
+def make_fern(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    for k in range(7):
+        ang = k * math.tau / 7 + rnd.uniform(-0.2, 0.2)
+        d = Vector((math.cos(ang), math.sin(ang), 0)); sd = Vector((-d.y, d.x, 0))
+        prev = None
+        for j in range(5):
+            t = j / 4
+            p = d * (t * 1.6) + Vector((0, 0, 1.1 * math.sin(t * math.pi * 0.75)))
+            w = 0.28 * math.sin(math.pi * min(t + 0.1, 1.0))
+            l, r = p + sd * w, p - sd * w
+            if prev:
+                m.face('fern' if j % 2 else 'leaf_light', [prev[0], prev[1], r, l])
+            prev = (l, r)
+    return m.done()
+
+def make_pine(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    h = rnd.uniform(13, 17)
+    m.cone('bark', 0.55, 0.3, h * 0.35, T(0, 0, h * 0.175), segs=7)
+    for k in range(4):
+        z = h * (0.22 + k * 0.18); r = lerp(3.4, 1.2, k / 3)
+        vs = m.cone('pine' if k % 2 == 0 else 'pine_light', r, 0.05, h * 0.32, T(0, 0, z + h * 0.16) @ RZ(rnd.uniform(0, 60)), segs=9)
+        m.jitter(vs, 0.25, 0.6, seed + k, radial=True)
+    return m.done()
+
+def make_giant_tree(name, seed):
+    """Árvore gigante (estilo Avatar): tronco largo com raízes e copas em camadas, ~45 m."""
+    rnd = random.Random(seed); m = Mesh(name)
+    H = 30.0
+    m.cone('bark', 3.6, 2.4, H, T(0, 0, H / 2), segs=12)
+    for k in range(6):   # raízes
+        a = k * math.tau / 6 + rnd.uniform(-0.3, 0.3)
+        d = Vector((math.cos(a), math.sin(a), 0))
+        m.cone('bark', 1.2, 0.3, 7.0, T(*(d * 3.6 + Vector((0, 0, 1.2)))) @ align_z(d + Vector((0, 0, -0.35))), segs=6)
+    for k in range(3):   # ramos
+        a = rnd.uniform(0, math.tau); d = Vector((math.cos(a), math.sin(a), 0.7)).normalized()
+        m.cone('bark', 1.0, 0.4, 10.0, T(*(Vector((0, 0, H * 0.72)) + d * 5)) @ align_z(d), segs=6)
+    for k, (z, r) in enumerate(((H + 2, 15.0), (H + 9, 12.0), (H + 14, 7.0))):
+        vs = m.sphere('giant_leaf', r, T(rnd.uniform(-2, 2), rnd.uniform(-2, 2), z) @ S(1, 1, 0.42), u=14, v=7)
+        m.jitter(vs, r * 0.08, 0.15, seed + k, radial=False)
+        m.paint(vs, lambda f: 'giant_leaf_light' if f.normal.z > 0.55 else ('giant_leaf_dark' if f.normal.z < -0.3 else None))
+    for k in range(10):   # trepadeiras com flores que brilham pouco
+        a = rnd.uniform(0, math.tau); z = rnd.uniform(4, H - 4)
+        m.sphere('flower_violet', 0.5, T(math.cos(a) * 3.2, math.sin(a) * 3.2, z), u=6, v=4)
+    return m.done()
+
+def make_dead_tree(name, seed):
+    rnd = random.Random(seed); m = Mesh(name)
+    h = rnd.uniform(7, 10)
+    m.cone('bark_grey', 0.5, 0.25, h, T(0, 0, h / 2) @ RY(rnd.uniform(-8, 8)), segs=7)
+    for k in range(4):
+        a = rnd.uniform(0, math.tau); z = rnd.uniform(h * 0.4, h * 0.9)
+        d = Vector((math.cos(a), math.sin(a), rnd.uniform(0.3, 0.9))).normalized()
+        L = rnd.uniform(2.5, 4.5)
+        m.cone('bark_grey', 0.22, 0.05, L, T(*(Vector((0, 0, z)) + d * L / 2)) @ align_z(d), segs=5)
+    return m.done()
+
+# ------------------------------------------------------------------ fauna (a animação é feita nos shaders do Godot)
+def make_grazer(name, seed, tall=False):
+    """Animal de manada (alien, low-poly). Frente = +Y (vira -Z no Godot); cabeça em y > 2."""
+    rnd = random.Random(seed); m = Mesh(name)
+    body_h = 3.4 if tall else 2.2
+    m.sphere('hide_tan', 1.0, T(0, 0, body_h) @ S(1.1, 2.0, 1.0), u=12, v=8)
+    m.sphere('hide_cream', 0.95, T(0, 0, body_h - 0.25) @ S(1.0, 1.8, 0.75), u=10, v=6)
+    for k in range(4):   # riscas
+        m.cone('hide_stripe', 1.02, 1.02, 0.22, T(0, -1.0 + k * 0.6, body_h) @ RX(90) @ S(1.1, 1.0, 1), segs=12, caps=False)
+    for sx in (-0.7, 0.7):
+        for sy in (-1.3, 1.3):
+            m.cone('hide_brown', 0.28, 0.2, body_h, T(sx, sy, body_h / 2), segs=6)
+            m.cone('hide_stripe', 0.24, 0.24, 0.3, T(sx, sy, 0.15), segs=6)
+    if tall:
+        neck = Vector((0, 1.0, 3.2)).normalized()
+        m.cone('hide_tan', 0.45, 0.3, 4.2, T(*(Vector((0, 1.6, body_h + 0.4)) + neck * 2.1)) @ align_z(neck), segs=8)
+        head = Vector((0, 1.6, body_h + 0.4)) + neck * 4.2
+    else:
+        neck = Vector((0, 1.0, 0.5)).normalized()
+        m.cone('hide_tan', 0.5, 0.35, 1.6, T(*(Vector((0, 1.9, body_h + 0.2)) + neck * 0.8)) @ align_z(neck), segs=8)
+        head = Vector((0, 1.9, body_h + 0.2)) + neck * 1.6
+    m.sphere('hide_brown', 0.55, T(*(head + Vector((0, 0.35, 0)))) @ S(0.8, 1.4, 0.8), u=10, v=6)
+    for sx in (-1, 1):
+        m.cone('horn', 0.12, 0.02, 1.1, T(head.x + sx * 0.35, head.y + 0.1, head.z + 0.6) @ RY(sx * 25), segs=5)
+    m.cone('hide_brown', 0.12, 0.04, 1.3, T(0, -2.1, body_h + 0.1) @ RX(-60), segs=5)
+    return m.done()
+
+def make_bird(name):
+    """Pássaro grande (envergadura ~4 m): asas em x, frente = +Y. As asas batem no shader."""
+    m = Mesh(name)
+    m.sphere('bird_white', 0.35, S(0.8, 2.2, 0.8), u=8, v=6)
+    m.sphere('bird_white', 0.25, T(0, 0.7, 0.12), u=6, v=4)
+    m.cone('flower_yellow', 0.08, 0.0, 0.35, T(0, 1.0, 0.1) @ RX(-90), segs=4)
+    for sx in (-1, 1):
+        m.face('bird_grey', [(sx * 0.25, 0.3, 0), (sx * 1.3, 0.25, 0.05), (sx * 1.3, -0.35, 0.05), (sx * 0.25, -0.35, 0)])
+        m.face('bird_tip', [(sx * 1.3, 0.25, 0.05), (sx * 2.1, -0.05, 0.1), (sx * 1.3, -0.35, 0.05)])
+    m.face('bird_grey', [(-0.25, -0.7, 0), (0.25, -0.7, 0), (0.0, -1.3, 0)])
+    return m.done()
+
+def make_manta(name):
+    """Raia voadora gigante (~20 m de envergadura) com pintas que brilham por baixo. Frente = +Y."""
+    m = Mesh(name)
+    prev = None
+    for k in range(9):
+        y = 6.0 - k * 1.5
+        w = 10.0 * math.sin(math.pi * min((k + 0.6) / 9.0, 1.0)) ** 0.8
+        z = 0.6 * math.cos(k * 0.4)
+        ring = [(-w, y, -0.2), (0, y, z + 0.6), (w, y, -0.2), (0, y, z - 0.6)]
+        if prev:
+            for a in range(4):
+                b = (a + 1) % 4
+                m.face('manta_top' if a < 2 else 'manta_belly', [prev[a], ring[a], ring[b], prev[b]])
+        prev = ring
+    m.cone('manta_top', 0.35, 0.02, 9.0, T(0, -10.5, 0) @ RX(90), segs=5)
+    for k in range(6):
+        m.ico('manta_glow', 0.35, T(-5 + k * 2, 1.5 - (k % 2) * 1.5, -0.5), sub=1)
+    return m.done()
+
+# ------------------------------------------------------------------ colossos (vêem-se do horizonte)
+def make_colossal_statue(name, seed=77):
+    """Guardião de pedra (~290 m com a lança), de elmo cónico, mão erguida para quem chega. Frente = +Y."""
+    rnd = random.Random(seed); m = Mesh(name)
+    m.box('stone_dark', 0, 0, 9, 84, 84, 18)
+    m.box('stone', 0, 0, 24, 70, 70, 12)
+    for sx in (-1, 1):
+        m.box('stone', sx * 12, 20, 34, 16, 28, 8)
+    robe = m.cone('stone', 34, 20, 124, T(0, 0, 92), segs=14)
+    m.jitter(robe, 1.8, 0.05, seed, radial=True)
+    for k in range(7):   # pregas do manto
+        a = math.radians(-60 + k * 20)
+        m.box('stone_dark', math.sin(a) * 27, math.cos(a) * 27, 88, 3, 3, 110, RZ(-math.degrees(a)))
+    m.cone('stone_dark', 21.5, 21.5, 6, T(0, 0, 151), segs=14, caps=False)
+    m.box('stone_light', 0, 0, 172, 46, 30, 40)
+    m.box('stone_dark', 0, 15.5, 172, 30, 2, 30)
+    for sx in (-1, 1):
+        m.sphere('stone_light', 15, T(sx * 26, 0, 188) @ S(1, 1, 0.8), u=10, v=6)
+    m.cone('stone', 9, 8, 10, T(0, 0, 197), segs=10)
+    m.sphere('stone_light', 12.5, T(0, 1.5, 211) @ S(0.95, 1.05, 1.15), u=12, v=8)
+    for sx in (-1, 1):
+        m.box('stone_eye', sx * 4.6, 13.2, 213, 4.2, 1.6, 2.2)
+    m.box('stone', 0, 11, 199, 9, 6, 10)          # barba
+    m.cone('stone_dark', 15, 4, 22, T(0, 0, 230), segs=12)      # elmo cónico
+    m.cone('stone_dark', 15.5, 15.5, 3, T(0, 0, 219.5), segs=12, caps=False)
+    m.box('stone_dark', 0, -1, 244, 2.5, 18, 8)                  # crista
+    # braço direito erguido para a frente, mão aberta
+    sh = Vector((26, 0, 190)); d1 = Vector((0.12, 0.75, 0.65)).normalized(); el = sh + d1 * 42
+    m.cone('stone', 8.5, 7.5, 42, T(*((sh + el) / 2)) @ align_z(d1), segs=10)
+    d2 = Vector((0.05, 0.55, 0.83)).normalized(); wr = el + d2 * 38
+    m.cone('stone', 7.5, 6.0, 38, T(*((el + wr) / 2)) @ align_z(d2), segs=10)
+    m.box('stone_light', wr.x, wr.y + 2, wr.z + 9, 14, 5, 18)
+    for k in range(4):
+        m.box('stone_light', wr.x - 5.25 + k * 3.5, wr.y + 2, wr.z + 22, 3, 4, 10)
+    m.box('stone_light', wr.x + 8.5, wr.y + 2, wr.z + 8, 3, 4, 9)
+    # braço esquerdo para baixo, a segurar a lança
+    lsh = Vector((-26, 0, 190)); lh = Vector((-34, 14, 140)); dd = lh - lsh
+    m.cone('stone', 8, 6.5, dd.length, T(*((lsh + lh) / 2)) @ align_z(dd), segs=10)
+    m.sphere('stone', 7, T(*lh), u=8, v=6)
+    m.cone('stone_dark', 2.6, 2.6, 250, T(-34, 14, 155), segs=8)
+    m.cone('stone_light', 6, 0.3, 26, T(-34, 14, 293), segs=6)
+    m.paint(list(m.bm.verts), lambda f: 'moss' if f.normal.z > 0.75 and f.calc_center_median().z > 36 else None)
+    return m.done()
+
+def make_ribcage(name, seed=81):
+    """Esqueleto de um animal colossal: a estrada passa por baixo da espinha, entre as costelas.
+    Espinha ao longo de Y (~110 m de altura), costelas a pousar no chão a ±80 m, crânio deitado ao lado."""
+    rnd = random.Random(seed); m = Mesh(name)
+    def zsp(y): return 108 + 14 * math.cos(math.pi * y / 320)
+    def tube(mat, pts, r0, r1, segs=7):
+        for k, (a, b) in enumerate(zip(pts, pts[1:])):
+            d = b - a
+            if d.length < 1e-3: continue
+            ra = lerp(r0, r1, k / (len(pts) - 1)); rb = lerp(r0, r1, (k + 1) / (len(pts) - 1))
+            m.cone(mat, ra, rb, d.length * 1.08, T(*((a + b) / 2)) @ align_z(d), segs=segs, caps=False)
+    for y in [(-150 + 14 * k) for k in range(23)]:
+        z = zsp(y)
+        m.box('bone' if (y // 14) % 2 else 'bone_dark', 0, y, z, 13, 10, 14)
+        m.cone('bone', 3.5, 0.8, 16, T(0, y, z + 15), segs=5)
+    for k in range(10):
+        y = -122 + k * 27.0
+        z = zsp(y)
+        for sx in (-1, 1):
+            a = Vector((sx * 6, y, z - 4)); c1 = Vector((sx * 92, y + 4, z * 0.82)); c2 = Vector((sx * 96, y + 8, z * 0.25)); b = Vector((sx * 80, y + 10, -8))
+            pts = []
+            for i in range(11):
+                t = i / 10.0
+                pts.append(a * (1 - t) ** 3 + c1 * 3 * t * (1 - t) ** 2 + c2 * 3 * t * t * (1 - t) + b * t ** 3)
+            tube('bone' if k % 2 else 'bone_dark', pts, 5.5, 3.0)
+    tail = [Vector((0, -150, zsp(-150))), Vector((-30, -190, 80)), Vector((-80, -215, 40)), Vector((-110, -230, 4)), Vector((-118, -236, -10))]
+    tube('bone_dark', tail, 6.0, 2.0)
+    # crânio deitado ao lado da estrada, à frente
+    sk = Vector((130, 150, 26))
+    head = m.sphere('bone', 30, T(*sk) @ RZ(-25) @ S(0.85, 1.5, 0.75), u=14, v=8)
+    m.jitter(head, 2.0, 0.08, seed, radial=False)
+    for sx in (-1, 1):
+        m.sphere('bone_socket', 7, T(sk.x + sx * 15, sk.y + 22, sk.z + 10), u=8, v=5)
+        d = Vector((sx * 0.6, 0.7, 0.5)).normalized()
+        m.cone('bone', 6, 0.8, 70, T(*(sk + Vector((sx * 18, 30, 8)) + d * 35)) @ align_z(d), segs=7)
+    m.box('bone_dark', sk.x - 10, sk.y + 8, 4, 40, 80, 10, RZ(-25))
+    return m.done()
+
+def make_crashed_ship(name, seed=91):
+    """Nave gigante caída (~900 m), de nariz enterrado e popa no ar, com torre de comando. Frente = +Y."""
+    rnd = random.Random(seed); m = Mesh(name)
+    L2, W2 = 450.0, 190.0
+    N_t = Vector((0, L2, 4)); N_b = Vector((0, L2, -6))
+    St = Vector((0, -L2, 150)); Lt = Vector((-W2, -L2, 0)); Rt = Vector((W2, -L2, 0))
+    Lb = Vector((-W2 + 10, -L2, -30)); Rb = Vector((W2 - 10, -L2, -30))
+    def tri_grid(mat, a, b, c, n=8):
+        # triângulo a-b-c subdividido (para pintar painéis)
+        rows = []
+        for i in range(n + 1):
+            row = []
+            for j in range(n + 1 - i):
+                p = a + (b - a) * (i / n) + (c - a) * (j / n)
+                row.append(m.bm.verts.new(p))
+            rows.append(row)
+        idx = m.mi(mat)
+        new = []
+        for i in range(n):
+            for j in range(n - i):
+                new.append(m.bm.faces.new((rows[i][j], rows[i + 1][j], rows[i][j + 1])))
+                if j + 1 < len(rows[i + 1]):
+                    new.append(m.bm.faces.new((rows[i + 1][j], rows[i + 1][j + 1], rows[i][j + 1])))
+        for f in new:   # o tampo vira-se para cima
+            f.material_index = idx; f.normal_update()
+            if f.normal.z < 0: f.normal_flip()
+    tri_grid('hull', N_t, Lt, St)
+    tri_grid('hull', N_t, St, Rt)
+    m.face('hull_dark', [N_t, N_b, Lb, Lt], want=(-1, 0, 0))
+    m.face('hull_dark', [N_t, Rt, Rb, N_b], want=(1, 0, 0))
+    m.face('hull_dark', [N_b, Rb, Lb], want=(0, 0, -1))
+    m.face('hull_dark', [Lb, Rb, Rt, St, Lt], want=(0, -1, 0))
+    m.paint(list(m.bm.verts), lambda f: ('hull_light' if noise.noise(f.calc_center_median() * 0.02) > 0.25 else
+                                         ('hull_rust' if noise.noise(f.calc_center_median() * 0.013 + Vector((5, 1, 2))) > 0.35 else None)))
+    # cidade de blocos ao longo da espinha
+    for k in range(18):
+        y = lerp(300, -360, k / 17); z = lerp(4, 150, (L2 - y) / (2 * L2))
+        w = lerp(20, 70, k / 17)
+        m.box(rnd.choice(['hull_light', 'hull_dark', 'hull']), rnd.uniform(-w * 0.3, w * 0.3), y, z + 6, w, rnd.uniform(18, 34), rnd.uniform(8, 18))
+    # torre de comando
+    m.box('hull_dark', 0, -390, 175, 70, 44, 52)
+    m.box('hull', 0, -392, 207, 130, 22, 16)
+    m.box('ship_light', 0, -380.5, 207, 110, 1.2, 3)
+    for sx in (-1, 1):
+        m.sphere('hull_light', 11, T(sx * 48, -392, 221), u=10, v=6)
+    # motores
+    for x in (-120, 0, 120):
+        m.cone('hull_dark', 34, 24, 40, T(x, -L2 - 18, 50 if x == 0 else 18) @ RX(90), segs=12)
+        m.cone('hull_rust', 22, 22, 6, T(x, -L2 - 40, 50 if x == 0 else 18) @ RX(90), segs=12, caps=False)
+    # janelas acesas ao longo das bordas
+    for k in range(14):
+        t = k / 13
+        for sx in (-1, 1):
+            p = N_t.lerp(Vector((sx * W2, -L2, 0)), 0.15 + t * 0.8) + Vector((0, 0, -10))
+            m.box('ship_light', p.x + sx * 1.0, p.y, p.z, 1.2, 10, 2.5)
+    # inclinar: nariz enterrado, popa no ar, um pouco de lado
+    bmesh.ops.transform(m.bm, matrix=RY(7) @ RX(-12), verts=list(m.bm.verts))
+    # destroços espalhados à volta
+    for k in range(10):
+        a = rnd.uniform(0, math.tau); r = rnd.uniform(260, 420)
+        m.box(rnd.choice(['hull', 'hull_dark', 'hull_rust']), math.cos(a) * r * 0.6, math.sin(a) * r, rnd.uniform(-4, 8),
+              rnd.uniform(20, 60), rnd.uniform(8, 20), rnd.uniform(6, 30), RX(rnd.uniform(-40, 40)) @ RZ(rnd.uniform(0, 180)))
+    return m.done()
+
 # ------------------------------------------------------------------ montagem
 def build_all():
     global COLL
@@ -899,12 +1240,25 @@ def build_all():
     B.append(make_ruin_wall('ruin_wall', 67))
     B.append(make_ruin_tower('ruin_tower', 71))
     B.append(make_aqueduct_seg('aqueduct_seg'))
+    B.append(make_cactus('cactus', 5))
+    B.append(make_palm('palm', 9))
+    B.append(make_bush('bush', 13))
+    B.append(make_flowers('flowers', 17))
+    B.append(make_fern('fern', 21))
+    B.append(make_pine('pine', 25))
+    B.append(make_giant_tree('tree_giant', 29))
+    B.append(make_dead_tree('dead_tree', 33))
+    B.append(make_grazer('grazer', 37))
+    B.append(make_grazer('grazer_tall', 41, tall=True))
+    B.append(make_colossal_statue('colosso_estatua'))
+    B.append(make_ribcage('colosso_costelas'))
+    B.append(make_crashed_ship('colosso_nave'))
     mj = os.path.normpath(os.path.join(HERE, '..', 'game', 'assets', 'map', 'map.json'))
     if os.path.exists(mj):  # túneis e pontes feitos à medida do mapa
         import json
         info = json.load(open(mj))
         for t in info['tunnels']:
-            B.append(make_tunnel(t['name'], t['len'], t['height']))
+            B.append(make_tunnel(t['name'], t['len'], t['tops'], t.get('step', 24.0)))
         for k, b in enumerate(info['bridges']):
             B.append(make_bridge(b['name'], b['len'], b['width'], b['broken'], seed=k + 3, deep=b.get('deep', 46.0)))
     B.append(make_canyon_roof('canyon_roof'))
@@ -924,7 +1278,7 @@ def export(objs):
 
 def layout(objs):
     """Arruma as peças em duas fileiras no .blend (grandes atrás, pequenas na frente)."""
-    big = ['canyon_roof', 'ruin_tower', 'aqueduct_seg', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
+    big = ['canyon_roof', 'ruin_tower', 'aqueduct_seg', 'tree_giant', 'colosso_estatua', 'colosso_costelas', 'colosso_nave', 'butte', 'arch_giant', 'mesa', 'arch_twin', 'rock_ring', 'rock_fin', 'arch', 'rock_spire_c', 'float_island']
     def width(ob): return max(v.co.x for v in ob.data.vertices) - min(v.co.x for v in ob.data.vertices)
     isbig = lambda o: o.name in big or o.name.startswith(('tunel', 'ponte'))
     rows = {0: [o for o in objs if not isbig(o)], 1: [o for o in objs if isbig(o)]}

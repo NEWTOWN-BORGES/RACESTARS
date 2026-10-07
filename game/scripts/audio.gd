@@ -4,6 +4,7 @@ extends Node
 
 var engine: AudioStreamPlayer
 var wind: AudioStreamPlayer
+var drift: AudioStreamPlayer
 var music: AudioStreamPlayer
 var voices: Array[AudioStreamPlayer] = []
 var _voice := 0
@@ -27,11 +28,12 @@ func _ready() -> void:
 		AudioServer.add_bus_effect(fx_bus, r)
 	reverb = AudioServer.get_bus_effect(fx_bus, 0)
 	reverb.wet = 0.0
-	for n in ["whoosh", "crash", "start", "beep", "go", "checkpoint", "finish", "scrape", "land"]:
+	for n in ["whoosh", "crash", "start", "beep", "go", "checkpoint", "finish", "scrape", "land", "boost"]:
 		S[n] = load("res://assets/audio/%s.wav" % n)
 	engine = _player(_loop(preload("res://assets/audio/engine_loop.wav")), -14.0, "Efeitos")
 	wind = _player(_loop(preload("res://assets/audio/wind_loop.wav")), -40.0, "Efeitos")
 	music = _player(_loop(preload("res://assets/audio/music_loop.wav")), -12.0, "Master")
+	drift = _player(_loop(preload("res://assets/audio/drift_loop.wav")), -60.0, "Efeitos")
 	for i in 5:
 		voices.append(_player(null, 0.0, "Efeitos"))
 	music.play()
@@ -88,14 +90,26 @@ func scrape(strength: float) -> void:
 	_scrape_cd = 0.18
 	_play("scrape", randf_range(0.85, 1.15), lerpf(-10.0, 0.0, clampf(strength / 40.0, 0.0, 1.0)))
 
+func bump(strength: float) -> void:
+	_play("crash", randf_range(1.1, 1.3), lerpf(-14.0, -4.0, clampf((strength - 45.0) / 60.0, 0.0, 1.0)))
+
+func boost() -> void:
+	_play("boost", 1.0, -3.0)
+
 func land(strength: float) -> void:
 	_play("land", randf_range(0.9, 1.1), lerpf(-10.0, 0.0, clampf(strength / 30.0, 0.0, 1.0)))
 
 func near_miss(frac: float) -> void:
 	_play("whoosh", randf_range(0.9, 1.15) + frac * 0.3, -2.0)
 
-func update(running: bool, frac: float, in_tunnel: bool, dt: float) -> void:
+func update(running: bool, frac: float, in_tunnel: bool, dt: float, drifting := false) -> void:
 	_scrape_cd -= dt
+	var dv := -10.0 if (drifting and running) else -60.0
+	drift.volume_db = move_toward(drift.volume_db, dv, dt * (90.0 if drifting else 60.0))
+	if drift.volume_db > -55.0 and not drift.playing:
+		drift.play()
+	elif drift.volume_db <= -59.0 and drift.playing:
+		drift.stop()
 	if running:
 		engine.pitch_scale = lerpf(engine.pitch_scale, 0.7 + frac * 1.15, 1.0 - exp(-dt * 6.0))
 		engine.volume_db = lerpf(-13.0, -6.0, frac) + (2.0 if in_tunnel else 0.0)

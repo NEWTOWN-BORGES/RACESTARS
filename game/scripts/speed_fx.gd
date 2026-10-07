@@ -10,6 +10,8 @@ var trail: CPUParticles3D
 var blur_layer: CanvasLayer
 var blur: ColorRect
 var blur_enabled := true
+var smoke: CPUParticles3D      # fumo/areia da derrapagem
+var _flash := 0.0
 
 func setup(p: Node3D, c: Camera3D) -> void:
 	player = p
@@ -17,6 +19,7 @@ func setup(p: Node3D, c: Camera3D) -> void:
 	_make_streaks()
 	_make_dust()
 	_make_trail()
+	_make_smoke()
 	_make_blur()
 
 func _unshaded(color: Color, additive: bool) -> StandardMaterial3D:
@@ -139,9 +142,51 @@ func _make_blur() -> void:
 	blur.visible = false
 	blur_layer.add_child(blur)
 
+func _make_smoke() -> void:
+	smoke = CPUParticles3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(3.0, 3.0)
+	var m := _unshaded(Color(1, 0.95, 0.85, 0.5), false)
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(0.5, 0.0)
+	m.albedo_texture = tex
+	q.material = m
+	smoke.mesh = q
+	smoke.amount = 60
+	smoke.lifetime = 0.7
+	smoke.local_coords = false
+	smoke.emission_shape = CPUParticles3D.EMISSION_SHAPE_POINTS
+	smoke.emission_points = PackedVector3Array([Vector3(-2.6, 0.2, 5.5), Vector3(2.6, 0.2, 5.5)])
+	smoke.direction = Vector3(0, 0.6, 1)
+	smoke.spread = 35.0
+	smoke.gravity = Vector3(0, 1.5, 0)
+	smoke.initial_velocity_min = 3.0
+	smoke.initial_velocity_max = 9.0
+	smoke.scale_amount_min = 0.8
+	smoke.scale_amount_max = 2.4
+	smoke.color_ramp = _fade_ramp(Color(0.95, 0.88, 0.74, 0.55))
+	smoke.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	smoke.emitting = false
+	player.add_child(smoke)
+
+## Clarão das turbinas quando sai o impulso da derrapagem.
+func boost_flash() -> void:
+	_flash = 1.0
+
 func update(running: bool, speed: float, frac: float, in_tunnel: bool, on_ground := true) -> void:
 	if player == null:
 		return
+	smoke.emitting = running and player.drifting
+	_flash = maxf(0.0, _flash - 0.03)
+	trail.scale_amount_min = 1.0 + _flash * 1.8
+	trail.scale_amount_max = 1.0 + _flash * 1.8
 	streaks.emitting = running
 	streaks.initial_velocity_min = speed * 1.4 + 30.0
 	streaks.initial_velocity_max = speed * 1.9 + 40.0

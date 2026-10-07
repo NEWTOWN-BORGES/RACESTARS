@@ -1,13 +1,13 @@
 extends Node3D
-## Terreno do mapa (6 x 6 km) a partir de assets/map/height.zst.
+## Terreno do mundo (24 x 24 km, células de 8 m) a partir de assets/map/height.zst.
 ## Para não engasgar no telemóvel nada é construído durante o jogo: há só 5 grelhas planas
 ## (uma por nível de detalhe) partilhadas por todos os pedaços de 512 m; a altura de cada
 ## vértice é lida na placa gráfica de uma textura. Trocar o nível de detalhe é só trocar a grelha.
 ## Colisão: um único HeightMapShape3D com os mesmos dados.
 
 const LOD_STEPS := [1, 2, 4, 8, 16]
-const LOD_DIST := [360.0, 820.0, 1500.0, 2500.0]
-const VIEW_DIST := 3400.0
+const LOD_DIST := [420.0, 1100.0, 2000.0, 3300.0]
+const VIEW_DIST := 4800.0
 const SKIRT := 30.0
 
 var res := 1537
@@ -47,9 +47,19 @@ func setup(info: Dictionary) -> void:
 	material.set_shader_parameter("skirt", SKIRT)
 	material.set_shader_parameter("water_y", float(info.water_y))
 	apply_biome(material, info)
-	if not info.lakes.is_empty():
-		var lk: Dictionary = info.lakes[0]
-		material.set_shader_parameter("lake", Vector3(lk.c[0], lk.c[1], lk.r))
+	# superfícies de água (até 16): centro/meia-largura e rotação, para escurecer o fundo
+	var rects := PackedVector4Array()
+	var rots := PackedVector4Array()
+	for w in info.waters:
+		if rects.size() >= 16:
+			break
+		rects.append(Vector4(w.c[0], w.c[1], w.sx, w.sz))
+		rots.append(Vector4(cos(w.yaw), sin(w.yaw), w.y, 0.0))
+	while rects.size() < 16:
+		rects.append(Vector4(0, 0, -1, -1))
+		rots.append(Vector4(1, 0, 0, 0))
+	material.set_shader_parameter("water_rects", rects)
+	material.set_shader_parameter("water_rots", rots)
 	for s in LOD_STEPS:
 		lod_meshes.append(_grid_mesh(s))
 	var n := (res - 1) / chunk_cells
