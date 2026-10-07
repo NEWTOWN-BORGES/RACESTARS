@@ -5,7 +5,8 @@ de 6 km cada: deserto de arenito, fenda vermelha, picos, costa, colinas verdes, 
 ilhas flutuantes, lagoa, selva do cenote, prado do aqueduto, dunas, vale dos arcos, floresta gigante,
 planície de sal, vale dos cristais e oásis.
 
-O mundo tem colinas por todo o lado e serras à volta das estradas. As estradas correm pelos vales.
+O mundo é uma ilha irregular rodeada de mar, com baías, enseadas, penínsulas e praias entre as 16 zonas.
+Tem colinas por todo o lado e serras à volta das estradas. As estradas correm pelos vales.
 Há **mais de 100 mil plantas e rochas** (florestas cerradas de pinheiros e árvores gigantes, savana de acácias,
 palmeiras nos oásis, cactos no deserto, cristais) e nada é animado, para o telemóvel aguentar.
 No horizonte há **estruturas colossais**, que se vêem a muitos km:

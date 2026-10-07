@@ -117,9 +117,20 @@ H = np.zeros_like(X)
 for k, a in enumerate(AREAS):
     H += RELIEF[a[5]] * W_area[k] / wsum
 del RELIEF
-# montanhas na borda do mundo
-edge = np.maximum(np.abs(X), np.abs(Z))
-H = H + (180 + 40 * fbm(X / 300, Z / 300) - H) * smooth(11850, 12150, edge)
+# costa irregular da ilha: a silhueta combina enseadas, penínsulas e baías,
+# mantendo o centro jogável e baixando suavemente o terreno até ao oceano.
+# O mapa continua quadrado para facilitar streaming, mas o mundo visível passa
+# a ser uma ilha com mar em toda a volta.
+ang = np.arctan2(Z, X)
+coast_noise = (0.55 * np.sin(3.0 * ang + 0.45) +
+               0.28 * np.sin(7.0 * ang - 1.1) +
+               0.17 * np.sin(11.0 * ang + 2.0))
+radius = 11200.0 + 1150.0 * coast_noise + 420.0 * fbm(X / 850.0, Z / 850.0, oct=3)
+dist = np.sqrt(X * X + Z * Z)
+coast = smooth(radius - 700.0, radius + 260.0, dist)
+# borda exterior funda-se no nível do mar; a transição larga evita uma parede
+# artificial e deixa praias e falésias coerentes com os biomas costeiros.
+H = H * (1.0 - coast) + (WATER_Y - 1.5 + 1.5 * fbm(X / 180.0, Z / 180.0, oct=2)) * coast
 H = H.astype(np.float32)
 
 def sample_arr(A, P):
