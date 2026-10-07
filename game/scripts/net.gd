@@ -20,6 +20,7 @@ const COLORS := [Color("#ff7a2e"), Color("#3fa8ff"), Color("#5fe06a"), Color("#c
 
 var online := false
 var mode := "corrida"             # "explorar" (mundo livre) ou "corrida" (circuito de A a B)
+var event := "grande"             # qual corrida: grande, floresta, monumentos ou drag
 var players := {}                 # id -> {"name": String, "color": int, "ready": bool}
 var my_name := "Jogador"
 var hosts := {}                   # ip -> {"name": String, "count": int, "seen": float}
@@ -184,15 +185,16 @@ func _sync_players(p: Dictionary) -> void:
 	players_changed.emit()
 
 ## Anfitrião: todos vão para o mundo, no modo escolhido.
-func start_race(m: String = "") -> void:
+func start_race(m: String = "", e: String = "") -> void:
 	if multiplayer.is_server():
 		for id in players:
 			players[id].ready = false
-		_go_race.rpc(m if m != "" else mode)
+		_go_race.rpc(m if m != "" else mode, e if e != "" else event)
 
 @rpc("authority", "reliable", "call_local")
-func _go_race(m: String) -> void:
+func _go_race(m: String, e: String) -> void:
 	mode = m
+	event = e
 	get_tree().paused = false
 	loading.emit()
 	await get_tree().process_frame
@@ -245,4 +247,4 @@ func _finished(time: float) -> void:
 
 ## Anfitrião: nova corrida com os mesmos jogadores.
 func rematch() -> void:
-	start_race(mode)
+	start_race(mode, event)

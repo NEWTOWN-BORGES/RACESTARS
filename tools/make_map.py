@@ -188,10 +188,16 @@ class Sec:
         return yaw_of(s.eu[0], s.eu[1])
 
 class Path:
-    def __init__(p, sec, name, level, ctrl, hw, hfun=None, ground=False, hctrl=None, world=False):
+    def __init__(p, sec, name, level, ctrl, hw, hfun=None, ground=False, hctrl=None, world=False, closed=False):
         p.sec, p.name, p.level, p.hw = sec, name, level, hw
         pts = ctrl if world else [sec.W(u, w) for u, w in ctrl]
-        P, own = catmull(pts, 2.0)
+        if closed:   # circuito: a curva dá a volta e acaba onde começou
+            n_ = len(pts)
+            P, own = catmull([pts[-1]] + list(pts) + [pts[0], pts[1]], 2.0)
+            keep = (own >= 1.0) & (own <= n_ + 1.0)
+            P, own = P[keep], own[keep] - 1.0
+        else:
+            P, own = catmull(pts, 2.0)
         if not world:
             P[0] = sec.A; P[-1] = sec.B
         p.P = P
@@ -200,7 +206,7 @@ class Path:
         p.u = ((P - sec.A) @ sec.eu) / sec.Ls if sec is not None else p.S / p.L
         t = np.gradient(P, axis=0); p.T = t / np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-6)
         if ground:   # segue o chão, suavizado
-            h = np.clip(gaussian_filter1d(sample(P), 35, mode='nearest'), 2.5, 30.0)
+            h = np.clip(gaussian_filter1d(sample(P), 35, mode='wrap' if closed else 'nearest'), 2.5, 45.0 if closed else 30.0)
         elif hctrl is not None:
             h = np.interp(own, np.arange(len(hctrl)), hctrl)
         else:
@@ -307,7 +313,7 @@ def add_prop(name, x, z, yaw, sc, sink=1.0, y=None):
     props.append([name, round(float(x), 2), round(float((height_at(x, z) if y is None else y) - sink), 2), round(float(z), 2),
                   round(float(yaw), 3), round(float(sc), 3)])
 
-def tunnel(sec, p, u0, u1, name, clear=22.0, top=None):
+def tunnel(sec, p, u0, u1, name, clear=22.0, top=None, thw=18.0):
     """Bloco de túnel (modelado no Blender) entre u0 e u1 do caminho p. A tampa acompanha o terreno
     por cima (montanha, colina ou chão), suavizado, e o terreno à volta da tampa é acertado a ela."""
     s0, s1 = p.s_at_u(u0), p.s_at_u(u1)
@@ -316,19 +322,20 @@ def tunnel(sec, p, u0, u1, name, clear=22.0, top=None):
     L = float(np.linalg.norm(b - a)); t = (b - a) / L; n = np.array([-t[1], t[0]])
     ys = np.arange(0.0, L + 24.0, 24.0); ys[-1] = L
     pts = a + np.outer(ys, t)
-    prof = np.minimum(sample(pts + n * 58), sample(pts - n * 58))
+    W = max(84.0, 2 * thw + 48.0)          # largura da tampa (o vão por dentro tem 2*thw)
+    prof = np.minimum(sample(pts + n * (W / 2 + 16)), sample(pts - n * (W / 2 + 16)))
     prof = gaussian_filter1d(prof, 3, mode='nearest')
     prof = np.maximum(prof, h0 + clear)
     if top is not None:          # um caminho passa por cima da tampa: a tampa fica à altura dele
         prof = np.maximum(np.full_like(prof, top), h0 + clear)
-    band = Line(a, b, 0.0, 46)
+    band = Line(a, b, 0.0, max(46.0, W / 2 + 4))
     band.P = pts; band.ht = prof
     carve(band, 36, 'set')
     seg = (p.S >= s0 - 120) & (p.S <= s1 + 120)   # a faixa da tampa estende-se para lá das bocas: reabre o caminho
     sub = Line(a, b, 0.0, p.hw); sub.P = p.P[seg]; sub.ht = p.ht[seg]
     carve(sub, 12, 'set')
     tunnels.append({'name': name, 'p': [float(a[0]), float(h0), float(a[1])], 'yaw': yaw_of(t[0], t[1]),
-                    'len': L, 'tops': [round(float(v - h0), 2) for v in prof], 'step': 24.0})
+                    'len': L, 'tops': [round(float(v - h0), 2) for v in prof], 'step': 24.0, 'w': W, 'thw': thw})
 
 def bridge(p, s, length, name, deck=None, broken=0.0, width=30.0, deep=46.0):
     c, t, h = p.at_s(s)
@@ -790,9 +797,197 @@ for k, (a, code, A_, B_, c) in enumerate(sec_specs):
     secs.append(s)
     print(f'{k:2d} {a[3]:<24} {code}  {s.Ls:5.0f} m  ' + ' | '.join(f'{p.name} ({p.L:.0f})' for p in s.paths))
 
+# ================================================================== provas novas: dois circuitos com voltas e uma reta de arranque
+# Ficam em sítios do mundo longe dos caminhos da grande corrida e trazem cenário próprio:
+# túneis, ponte sobre um rio, saltos, monumentos gigantes e faixas de impulso.
+print('provas novas...')
+class EvSec:
+    def __init__(s, key, title, biome, kind, laps):
+        s.key = s.code = key; s.tag = key; s.title = title; s.biome = biome
+        s.kind, s.laps = kind, laps
+        s.paths, s.deco, s.plan = [], [], []        # plan: colossos a pôr depois (nome, x, z, yaw, escala, afundar)
+        s.pads, s.gates_s = [], []                   # faixas de impulso (s, desvio lateral) e portões (s)
+        s.no_obst = False
+
+pts_main = np.vstack([p.P for s_ in secs for p in s_.paths])
+ev_secs, ev_pts = [], []
+
+def place_shape(local, region, margin, closed=True, angles=16, step=250.0):
+    L = np.array(local, float); L = L - L.mean(0)
+    seq = np.vstack([L, L[:1]]) if closed else L
+    dense = np.vstack([np.linspace(a, b, max(2, int(np.linalg.norm(b - a) / 40))) for a, b in zip(seq, seq[1:])])
+    tree = cKDTree(np.vstack([pts_main] + ev_pts))
+    best = None
+    for ang in np.linspace(0, 2 * math.pi, angles, endpoint=False):
+        R = np.array([[math.cos(ang), -math.sin(ang)], [math.sin(ang), math.cos(ang)]])
+        rd = dense @ R.T
+        for cx in np.arange(region[0], region[1] + 1, step):
+            for cz in np.arange(region[2], region[3] + 1, step):
+                w = rd + (cx, cz)
+                if np.abs(w).max() > 11000:
+                    continue
+                m = float(tree.query(w)[0].min())
+                if best is None or m > best[0]:
+                    best = (m, ang, cx, cz)
+    m, ang, cx, cz = best
+    R = np.array([[math.cos(ang), -math.sin(ang)], [math.sin(ang), math.cos(ang)]])
+    W = L @ R.T + (cx, cz)
+    print(f'  lugar: centro ({cx:.0f},{cz:.0f}) rodado {math.degrees(ang):.0f}°, a {m:.0f} m dos outros caminhos')
+    return [np.array(v) for v in W]
+
+def straight_spots(p, n, run=600.0, keep_off=(), gap=150.0, dev=14.0):
+    """n sítios onde a estrada segue quase a direito durante 'run' metros (placas de aceleração:
+    o impulso nunca atira o veículo para uma curva). Longe (gap) de túneis, saltos e portões."""
+    closed = p_closed(p)
+    ds = float(np.median(np.diff(p.S))); w = max(2, int(run / ds)); N = len(p.P)
+    PP = np.vstack([p.P, p.P[1:w + 1]]) if closed else p.P
+    score = np.full(N, np.inf)
+    for i in range(0, N, max(1, int(20 / ds))):
+        if i + w >= len(PP):
+            break
+        a_, b_ = PP[i], PP[i + w]; t_ = (b_ - a_) / max(np.linalg.norm(b_ - a_), 1e-6)
+        q = PP[i:i + w + 1] - a_
+        score[i] = float(np.abs(q[:, 0] * t_[1] - q[:, 1] * t_[0]).max())   # quanto se afasta da reta
+    out = []
+    for i in np.argsort(score):
+        sv = float(p.S[i])
+        if score[i] > dev or len(out) >= n:
+            break
+        if sv < 200:
+            continue
+        if any(abs(sv - o) < p.L / (n + 3) for o in out):
+            continue
+        if any(min(abs(sv - k), abs(sv - k + p.L), abs(sv - k - p.L)) < gap for k in keep_off):
+            continue
+        out.append(sv + 60.0)
+    return sorted(out)
+
+def p_closed(p):
+    return float(np.linalg.norm(p.P[0] - p.P[-1])) < 20.0
+
+def s_near(p, q):
+    return float(p.S[int(np.argmin(np.linalg.norm(p.P - q, axis=1)))])
+
+def hill_at(c, t, ru, rv, top, flat=False):
+    """Colina (ou mesa de topo plano) elíptica, alongada ao longo de t."""
+    def f(sub, r):
+        if flat:
+            return np.maximum(sub, sub + (top - sub) * (1 - smooth(0.82, 1.0, r)))
+        return np.maximum(sub, sub + (top - sub) * (1 - smooth(0.25, 1.0, r)) ** 1.3)
+    stamp_ellipse(c, ru, rv, t, f)
+
+def ravine(p, sv, depth, half, length=420.0):
+    """Ravina a atravessar o caminho em s (cortada depois de esculpir o caminho)."""
+    c, t, _ = p.at_s(sv); n = np.array([-t[1], t[0]])
+    carve(Line(c - n * length / 2, c + n * length / 2, depth, half), 6, 'cut')
+
+def guardians_at(ev, p, sv, sc=1.0, off=80.0):
+    c, t, _ = p.at_s(sv); n = np.array([-t[1], t[0]])
+    for sg in (-1, 1):
+        q = c + n * sg * (p.hw + off * sc)
+        ev.plan.append(('colosso_estatua', q[0], q[1], yaw_of(-t[0], -t[1]), sc, 4.0))
+
+def over_track(ev, p, sv, name, sc, sink=2.0):
+    c, t, _ = p.at_s(sv)
+    ev.plan.append((name, c[0], c[1], yaw_of(t[0], t[1]), sc, sink, 'over'))
+
+# ---------- Circuito da Floresta: túnel debaixo de uma colina, ponte sobre um rio, salto numa ravina, árvores gigantes
+LOC_F = [(0, 0), (600, 0), (1200, 0), (1800, 0), (2400, 250), (2800, 700), (2800, 1000), (2800, 1150), (2800, 1750),
+         (2800, 1900), (2500, 2300), (1900, 2500), (1300, 2500), (800, 2300), (300, 1900), (-200, 1300), (-500, 700), (-500, 250)]
+Wf = place_shape(LOC_F, (-10600, -7600, 1300, 4900), 320, step=150.0)
+evf = EvSec('floresta', 'Circuito da Floresta', 'forest', 'circuit', 3)
+fp = Path(None, 'circuito da floresta', 1, Wf, 34, ground=True, world=True, closed=True)
+evf.paths.append(fp)
+sB, sC = s_near(fp, Wf[7]), s_near(fp, Wf[8])
+sR = s_near(fp, (Wf[11] + Wf[12]) / 2)                        # rio
+sJ = s_near(fp, Wf[12] * 0.45 + Wf[13] * 0.55)                  # ravina do salto
+fp.kicker(sJ - 16 - 6 - 4, rise=3.0, run=40)
+tB = (Wf[8] - Wf[7]) / np.linalg.norm(Wf[8] - Wf[7])
+hill_at((Wf[7] + Wf[8]) / 2, tB, 520, 380, float(np.max(sample(np.array([(Wf[7] + Wf[8]) / 2])))) + 80)
+carve(fp, 50)
+tunnel(None, fp, sB / fp.L, sC / fp.L, 'tunel_cf', thw=fp.hw + 4, clear=36.0)
+cR, tR, hR = fp.at_s(sR); nR = np.array([-tR[1], tR[0]])
+carve(Line(cR - nR * 520, cR + nR * 520, -9.0, 24), 14, 'cut')
+waters.append({'c': [float(cR[0]), float(cR[1])], 'sx': 34.0, 'sz': 520.0, 'yaw': yaw_of(nR[0], nR[1]), 'y': float(WATER_Y)})
+bridge(fp, sR, 2 * (24 + 14) + 34, 'ponte_cf', deck=float(hR), width=2 * fp.hw + 8, deep=30.0)
+ravine(fp, sJ, GROUND - 14, 16)
+guardians_at(evf, fp, s_near(fp, Wf[2]), 1.0)
+for f_ in np.linspace(0.62, 0.95, 9):                            # árvores gigantes a ladear a estrada
+    c, t, _ = fp.at_s(f_ * fp.L); n = np.array([-t[1], t[0]])
+    for sg in (-1, 1):
+        q = c + n * sg * (fp.hw + float(rng.uniform(45, 75)))
+        evf.plan.append(('tree_giant', q[0], q[1], float(rng.uniform(-3, 3)), float(rng.uniform(4.0, 6.0)), 2.0))
+cin = np.mean(np.array(Wf), axis=0)
+evf.plan.append(('tree_giant', cin[0], cin[1], 0.3, 9.0, 3.0))  # a árvore-mundo no meio do circuito
+evf.gates_s = [fp.L * k / 6 for k in range(1, 6)] + [0.0]
+evf.pads = [(sv, 0.0) for sv in straight_spots(fp, 4, keep_off=[sB, sC, sJ, sR] + evf.gates_s)]
+ev_secs.append(evf); ev_pts.append(fp.P)
+print(f'  Circuito da Floresta: {fp.L:.0f} m, placas em', [round(a) for a, _ in evf.pads])
+
+# ---------- Circuito dos Monumentos: anel gigante, arco colossal, túnel debaixo de uma mesa, salto, pirâmide e obeliscos
+LOC_M = [(0, 0), (700, 0), (1400, 0), (2000, 200), (2400, 600), (2500, 1100), (2300, 1600), (1900, 1900), (1700, 1900),
+         (1100, 1900), (900, 1900), (400, 1700), (0, 1300), (-300, 800), (-350, 300)]
+Wm = place_shape(LOC_M, (1500, 4600, 1500, 4600), 320, step=150.0)
+evm = EvSec('monumentos', 'Circuito dos Monumentos', 'desert', 'circuit', 3)
+mp_ = Path(None, 'circuito dos monumentos', 1, Wm, 34, ground=True, world=True, closed=True)
+evm.paths.append(mp_)
+sB, sC = s_near(mp_, Wm[8]), s_near(mp_, Wm[9])
+sJ = s_near(mp_, (Wm[11] + Wm[12]) / 2)
+mp_.kicker(sJ - 20 - 6 - 4, rise=3.0, run=40)
+tB = (Wm[9] - Wm[8]) / np.linalg.norm(Wm[9] - Wm[8])
+hill_at((Wm[8] + Wm[9]) / 2, tB, 440, 300, float(np.max(sample(np.array([(Wm[8] + Wm[9]) / 2])))) + 70, flat=True)
+carve(mp_, 50)
+tunnel(None, mp_, sB / mp_.L, sC / mp_.L, 'tunel_cm', thw=mp_.hw + 4, clear=36.0)
+ravine(mp_, sJ, GROUND - 16, 20)
+over_track(evm, mp_, s_near(mp_, Wm[1]) + 40, 'rock_ring', 11.0)
+over_track(evm, mp_, s_near(mp_, (Wm[4] + Wm[5]) / 2), 'arch_giant', 4.5)
+guardians_at(evm, mp_, s_near(mp_, (Wm[13] + Wm[14]) / 2), 1.05)
+cin = np.mean(np.array(Wm), axis=0)
+evm.plan.append(('piramide', cin[0], cin[1], 0.4, 2.2, 6.0))
+for k in range(4):
+    a = 0.4 + math.pi / 4 + k * math.pi / 2
+    q = cin + np.array([math.cos(a), math.sin(a)]) * 470
+    evm.plan.append(('obelisco', q[0], q[1], a, 1.6, 1.0))
+c0, t0, _ = mp_.at_s(25.0); n0 = np.array([-t0[1], t0[0]])
+for sg in (-1, 1):
+    q = c0 + n0 * sg * (mp_.hw + 30)
+    evm.plan.append(('obelisco', q[0], q[1], yaw_of(t0[0], t0[1]), 0.6, 1.0))
+evm.gates_s = [mp_.L * k / 6 for k in range(1, 6)] + [0.0]
+evm.pads = [(sv, 0.0) for sv in straight_spots(mp_, 3, keep_off=[sB, sC, sJ] + evm.gates_s)]
+ev_secs.append(evm); ev_pts.append(mp_.P)
+print(f'  Circuito dos Monumentos: {mp_.L:.0f} m, placas em', [round(a) for a, _ in evm.pads])
+
+# ---------- Reta do Sal (drag): 3 km planos, faixas de impulso alternadas, pilares de cristal, guardiões na meta
+DRAG_LEN = 3000.0
+LOC_D = [(0, 0), (1133, 0), (2266, 0), (3400, 0)]
+Wd = place_shape(LOC_D, (-4300, -1800, 7000, 11000), 250, closed=False, angles=8, step=150.0)
+evd = EvSec('drag', 'Reta do Sal', 'salt', 'drag', 1)
+evd.no_obst = True
+dp = Path(None, 'reta do sal', 1, Wd, 46, hfun=lambda u: np.full_like(u, GROUND), world=True)
+evd.paths.append(dp)
+carve(dp, 220, 'set', hw=dp.hw + 70)
+carve(dp, 30, 'set')
+drag_line = (Wd[0], Wd[-1])
+for k, sv in enumerate(np.arange(450.0, DRAG_LEN - 300, 380.0)):
+    evd.pads.append((float(sv), 17.0 * (1 if k % 2 == 0 else -1)))
+for sv in np.arange(100.0, dp.L, 200.0):                       # pilares de cristal dos dois lados
+    c, t, _ = dp.at_s(sv); n = np.array([-t[1], t[0]])
+    for sg in (-1, 1):
+        q = c + n * sg * (dp.hw + 28)
+        evd.deco.append(('crystals_cyan_big', q[0], q[1], float(rng.uniform(-3, 3)), float(rng.uniform(2.6, 3.4)), 0.8, None))
+guardians_at(evd, dp, DRAG_LEN + 60, 1.1, off=70)
+c0, t0, _ = dp.at_s(10.0); n0 = np.array([-t0[1], t0[0]])
+for sg in (-1, 1):
+    q = c0 + n0 * sg * (dp.hw + 35)
+    evd.plan.append(('obelisco', q[0], q[1], yaw_of(t0[0], t0[1]), 0.8, 1.0))
+evd.gates_s = []
+ev_secs.append(evd); ev_pts.append(dp.P)
+print(f'  Reta do Sal: {DRAG_LEN:.0f} m (+{dp.L - DRAG_LEN:.0f} m para travar)')
+all_secs = secs + ev_secs
+
 # nenhum caminho fica enterrado: corta (sem nunca encher) o chão que ficou acima de cada estrada,
 # por exemplo quando um caminho vizinho, esculpido depois, levantou o terreno por cima dela
-for s_ in secs:
+for s_ in all_secs:
     for p in s_.paths:
         carve(p, 4, 'cut', hw=p.hw * 0.9)
 
@@ -838,6 +1033,7 @@ for w in waters:
     c = np.array(w['c']); f = fwd_of(w['yaw']); n = np.array([-f[1], f[0]])
     for o in np.linspace(-w['sx'], w['sx'], max(2, int(w['sx'] / 60) + 1)):
         pin_segment(c + n * o - f * w['sz'], c + n * o + f * w['sz'], 120)
+pin_segment(drag_line[0], drag_line[1], 300)      # a reta do sal fica perfeitamente plana
 deep = H[::4, ::4][:NM, :NM] < -12.0
 pin |= binary_dilation(deep, iterations=4)
 pin_d = distance_transform_edt(~pin) * MR
@@ -848,7 +1044,7 @@ U = (1.3 * amp * hills * M_free).astype(np.float32)
 del amp, hills, M_free
 # serras e picos LONGE dos caminhos: as estradas correm em vales, com montanhas à volta e no horizonte
 print('serras...')
-pts_all = np.vstack([p.P for s_ in secs for p in s_.paths])
+pts_all = np.vstack([p.P for s_ in all_secs for p in s_.paths])
 occ = np.zeros((NM, NM), bool)
 occ[np.clip(np.round((pts_all[:, 1] + HALF) / MR).astype(int), 0, NM - 1), np.clip(np.round((pts_all[:, 0] + HALF) / MR).astype(int), 0, NM - 1)] = True
 path_d = distance_transform_edt(~occ) * MR
@@ -874,7 +1070,7 @@ del gz_, gx_, slope_u
 def U_at(x, z):
     return float(sample_arr(U, np.array([[x, z]]))[0])
 
-for s_ in secs:
+for s_ in all_secs:
     for p in s_.paths:
         uu = sample_arr(U, p.P)
         p.h = p.h + uu
@@ -890,10 +1086,10 @@ for k, a in enumerate(AREAS):
     biome += w[..., None] * np.array(B_CH[a[4]], np.float32)
 Xd, Zd = X[::STEP, ::STEP], Z[::STEP, ::STEP]
 grid_pts = np.stack([Xd.ravel(), Zd.ravel()], 1)
-allP = np.vstack([p.P for s in secs for p in s.paths])
-path_hw = np.concatenate([np.full(len(p.P), p.hw) for s in secs for p in s.paths])
+allP = np.vstack([p.P for s in all_secs for p in s.paths])
+path_hw = np.concatenate([np.full(len(p.P), p.hw) for s in all_secs for p in s.paths])
 path_tree = cKDTree(allP)
-ground_paths = np.vstack([p.P for s in secs for p in s.paths if p.level == 1])
+ground_paths = np.vstack([p.P for s in all_secs for p in s.paths if p.level == 1])
 road_d, _ = cKDTree(ground_paths).query(grid_pts, workers=-1)
 road = (1 - smooth(18, 34, road_d)).reshape(Xd.shape)            # caminhos de terra nas zonas verdes
 biome[..., 0] *= 1 - 0.85 * road
@@ -936,7 +1132,7 @@ def in_tunnel(x, z):
 
 # ------------------------------------------------------------------ peças
 print('peças...')
-for s in secs:   # decoração própria de cada trecho (as alturas fixas sobem com as colinas)
+for s in all_secs:   # decoração própria de cada trecho (as alturas fixas sobem com as colinas)
     for name, x, z, yaw, sc, sink, y in s.deco:
         add_prop(name, x, z, yaw, sc, sink, y=None if y is None else y + U_at(x, z))
 
@@ -948,7 +1144,9 @@ OBST = {'desert': ['boulder_a', 'rock_spire_b', 'rock_spire_a', 'cactus'], 'mead
         'arches': ['rock_spire_a', 'cactus', 'rock_fin'], 'forest': ['tree_giant', 'pine', 'tree_mushroom'],
         'salt': ['crystals_cyan_big', 'rock_spire_b', 'boulder_a'], 'crystals': ['crystals_mag_big', 'crystals_cyan_big', 'rock_spire_c'],
         'oasis': ['palm', 'cactus', 'boulder_a']}
-for s in secs:   # obstáculos dentro dos caminhos (desviar, ou passar por cima das pedras baixas)
+for s in all_secs:   # obstáculos dentro dos caminhos (desviar, ou passar por cima das pedras baixas)
+    if getattr(s, 'no_obst', False):
+        continue
     for p in s.paths:
         if p.level == 3:
             continue
@@ -1012,7 +1210,7 @@ print('colossos...')
 colossi = []
 FOOT = {'colosso_estatua': 46, 'colosso_costelas': 0, 'colosso_nave': 470, 'rock_ring': 0, 'arch_giant': 0,
         'rock_spire_c': 9, 'rock_spire_a': 7, 'butte': 70, 'tree_giant': 14, 'tree_mushroom': 6, 'crystals_cyan': 4,
-        'crystals_mag': 4, 'ruin_tower': 11, 'rock_fin': 17, 'float_island': 0}
+        'crystals_mag': 4, 'ruin_tower': 11, 'rock_fin': 17, 'float_island': 0, 'piramide': 135, 'obelisco': 12}
 
 def far_from_paths(x, z, r):
     d, i = path_tree.query([x, z])
@@ -1126,6 +1324,20 @@ def sky_islands(key, n, sc_rng, alt=(380, 650)):
         colossus('float_island', q[0], q[1], float(rng.uniform(-math.pi, math.pi)), sc, 0.0,
                  y=height_at(q[0], q[1]) + float(rng.uniform(*alt)), foot=0, occ=False)
 
+# monumentos das provas novas (planeados junto com as pistas)
+LEGS = {'rock_ring': 13.5, 'arch_giant': 30.0}
+for ev in ev_secs:
+    for item in ev.plan:
+        name, x, z, yaw, sc, sink = item[:6]
+        if len(item) > 6:   # por cima da pista: as pernas assentam no chão mais baixo dos dois lados
+            f_ = np.array([-math.sin(yaw), -math.cos(yaw)]); n_ = np.array([-f_[1], f_[0]])
+            feet = [np.array([x, z]) + n_ * sg * LEGS[name] * sc for sg in (-1, 1)] + [np.array([x, z])]
+            colossus(name, x, z, yaw, sc, sink, y=float(min(sample(np.array(feet)))), occ=False)
+            for q in feet[:2]:
+                occupy(q[0], q[1], 60 * sc / 10)
+        else:
+            colossus(name, x, z, yaw, sc, sink)
+
 RIBS = [(sg * 80.0, a) for sg in (-1, 1) for a in (-120.0, -40.0, 40.0, 120.0)]
 ARCH = [(-150.0, 0.0), (150.0, 0.0)]
 RING = [(-160.0, 0.0), (160.0, 0.0)]
@@ -1206,7 +1418,7 @@ print('  espalhadas:', count)
 
 # bandeirolas por cima dos caminhos de chão (perto dos portões)
 banners = []
-for s in secs:
+for s in all_secs:
     for p in s.paths:
         if p.level in (1, 3):
             for f in (0.08, 0.92):
@@ -1247,6 +1459,106 @@ while sum(len(v) for v in ground_cover.values()) < 30000 and tries < 400000:
                                round(float(rng.uniform(0.8, 1.6)), 2)])
 
 # fauna: manadas a pastar (estáticas)
+# ------------------------------------------------------------------ vegetação densa (florestas a sério)
+# Dezenas de milhares de árvores, arbustos e fetos, com manchas e clareiras, longe das estradas.
+# Vai num ficheiro binário à parte (veg.zst) para o map.json não crescer: 2 palavras de 32 bits por planta.
+print('vegetação...')
+VEG_TYPES = ['pine', 'tree_acacia', 'tree_acacia_b', 'tree_giant', 'palm', 'cactus', 'bush', 'tree_mushroom', 'dead_tree',
+             'fern', 'boulder_a', 'crystals_cyan', 'crystals_mag']
+VEG = {'forest': (1600, {'pine': 46, 'tree_acacia': 14, 'tree_giant': 3, 'bush': 22, 'fern': 15}),
+       'jungle': (1500, {'tree_mushroom': 6, 'tree_giant': 3, 'tree_acacia': 28, 'tree_acacia_b': 8, 'fern': 30, 'bush': 25}),
+       'meadow': (520, {'tree_acacia': 30, 'tree_acacia_b': 20, 'bush': 35, 'pine': 15}),
+       'peaks': (560, {'pine': 70, 'bush': 20, 'boulder_a': 10}),
+       'massif': (640, {'pine': 50, 'tree_acacia': 15, 'bush': 35}),
+       'savanna': (300, {'tree_acacia': 40, 'tree_acacia_b': 30, 'bush': 20, 'dead_tree': 10}),
+       'coast': (280, {'palm': 50, 'bush': 40, 'tree_acacia_b': 10}),
+       'lagoon': (380, {'palm': 60, 'bush': 40}),
+       'oasis': (120, {'palm': 40, 'cactus': 40, 'bush': 20}),
+       'desert': (35, {'cactus': 50, 'dead_tree': 25, 'boulder_a': 25}),
+       'sandstone': (150, {'tree_acacia': 35, 'bush': 35, 'cactus': 20, 'boulder_a': 10}),
+       'red': (45, {'cactus': 40, 'dead_tree': 30, 'boulder_a': 30}),
+       'arches': (50, {'cactus': 60, 'dead_tree': 20, 'bush': 20}),
+       'salt': (12, {'crystals_cyan': 100}),
+       'crystals': (260, {'crystals_cyan': 30, 'crystals_mag': 30, 'pine': 20, 'bush': 20})}
+# o que já ocupa o chão (colossos e peças grandes): grelha de 32 m
+occ_v = np.zeros((NM, NM), bool)
+for cell_items in grid_occ.values():
+    for px_, pz_, pr_ in cell_items:
+        if pr_ < 6:
+            continue
+        r_ = int(pr_ / MR) + 1
+        ci, cj = int(round((px_ + HALF) / MR)), int(round((pz_ + HALF) / MR))
+        occ_v[max(0, cj - r_):cj + r_ + 1, max(0, ci - r_):ci + r_ + 1] = True
+# à beira das estradas as árvores são mais cerradas (é o que se vê a alta velocidade)
+ROADSIDE = {'forest': 0.8, 'jungle': 0.8, 'meadow': 0.55, 'massif': 0.5, 'peaks': 0.5, 'savanna': 0.4,
+            'crystals': 0.4, 'coast': 0.35, 'lagoon': 0.35, 'sandstone': 0.2}
+
+def veg_ok(q):
+    """Tira o que cai na estrada, em peças grandes, na água ou em encostas a pique."""
+    d_, i_ = path_tree.query(q, workers=-1)
+    q = q[d_ > path_hw[i_] + 22]
+    oi = np.clip(np.round((q[:, 0] + HALF) / MR).astype(int), 0, NM - 1); oj = np.clip(np.round((q[:, 1] + HALF) / MR).astype(int), 0, NM - 1)
+    q = q[~occ_v[oj, oi]]
+    e_ = 5.0
+    hx = (sample(q + [e_, 0]) - sample(q - [e_, 0])) / (2 * e_); hz = (sample(q + [0, e_]) - sample(q - [0, e_])) / (2 * e_)
+    h_ = sample(q)
+    return q[(h_ > WATER_Y + 1.5) & (np.hypot(hx, hz) < 0.65)]
+
+veg_q, veg_t = [], []
+def veg_add(q, mix):
+    names = list(mix); w_ = np.array([mix[nm] for nm in names], float); w_ /= w_.sum()
+    ty = rng.choice(len(names), size=len(q), p=w_)
+    veg_q.append(q); veg_t.append(np.array([VEG_TYPES.index(names[t]) for t in ty], np.int64))
+
+for k, a in enumerate(AREAS):
+    dens, mix = VEG[a[4]]
+    c = area_center(a[0], a[1])
+    n = int(dens * (AREA / 1000.0) ** 2 * 1.9)
+    q = c + rng.uniform(-AREA / 2 - 350, AREA / 2 + 350, (n, 2))
+    ii = np.clip(((q[:, 0] + HALF) / (CELL * 8)).astype(int), 0, area_idx.shape[1] - 1)
+    jj = np.clip(((q[:, 1] + HALF) / (CELL * 8)).astype(int), 0, area_idx.shape[0] - 1)
+    keep = area_idx[jj, ii] == k
+    clump = fbm(q[:, 0] / 650 + k * 3.1, q[:, 1] / 650 - k * 1.7, oct=3)
+    d_road, _ = path_tree.query(q, workers=-1)
+    near = ROADSIDE.get(a[4], 0.0) * (1 - smooth(70, 280, d_road))
+    keep &= rng.random(n) < np.maximum(smooth(0.3, 0.62, clump), near)
+    keep &= np.abs(q).max(axis=1) < 11700
+    veg_add(veg_ok(q[keep]), mix)
+# Circuito da Floresta: floresta cerrada dos dois lados da pista (mais cerrada junto à estrada)
+for ev_ in ev_secs:
+    if ev_.biome != 'forest':
+        continue
+    for fp_ in ev_.paths:
+        n = int(fp_.L * 2 * 440 * 3200e-6)
+        k_ = rng.integers(0, len(fp_.P), n)
+        nrm = np.stack([-fp_.T[k_, 1], fp_.T[k_, 0]], 1)
+        off = rng.uniform(fp_.hw + 20, fp_.hw + 460, n) * rng.choice([-1.0, 1.0], n)
+        q = fp_.P[k_] + nrm * off[:, None] + rng.normal(0, 6, (n, 2))
+        q = q[rng.random(n) < 1 - smooth(fp_.hw + 160, fp_.hw + 460, np.abs(off))]
+        q = veg_ok(q)
+        veg_add(q, {'pine': 42, 'tree_acacia': 22, 'tree_acacia_b': 6, 'tree_giant': 4, 'tree_mushroom': 2, 'bush': 14, 'fern': 10})
+        print(f'  floresta do circuito: {len(q)} plantas')
+veg_q = np.vstack(veg_q); veg_t = np.concatenate(veg_t)
+nveg = len(veg_q)
+vy = sample(veg_q) - 0.3
+yaw_q = rng.integers(0, 64, nveg)
+sc_q = np.where(np.isin(veg_t, [VEG_TYPES.index('tree_giant')]), rng.integers(4, 22, nveg), rng.integers(7, 30, nveg))  # escala 0.6 + q*0.03
+qx = np.clip(np.round((veg_q[:, 0] + HALF) * 2), 0, 65535).astype(np.uint32)
+qz = np.clip(np.round((veg_q[:, 1] + HALF) * 2), 0, 65535).astype(np.uint32)
+qy = np.clip(np.round((vy + 100.0) * 64), 0, 65535).astype(np.uint32)
+w0 = qx | (qz << 16)
+w1 = qy | (veg_t.astype(np.uint32) << 16) | (yaw_q.astype(np.uint32) << 20) | (sc_q.astype(np.uint32) << 26)
+veg_words = np.stack([w0, w1], 1).astype('<u4')
+from collections import Counter as _C
+print('  plantas:', nveg, dict(_C(VEG_TYPES[t] for t in veg_t)))
+# o chão das florestas fica mais escuro (copas por cima)
+trees_mask = np.isin(veg_t, [VEG_TYPES.index(n_) for n_ in ('pine', 'tree_acacia', 'tree_acacia_b', 'tree_giant', 'tree_mushroom', 'palm')])
+hist, _, _ = np.histogram2d(veg_q[trees_mask, 1], veg_q[trees_mask, 0], bins=biome.shape[:2], range=[[-HALF, HALF], [-HALF, HALF]])
+canopy = np.clip(gaussian_filter(hist.astype(np.float32), 2.5) * 6.0, 0, 1)
+biome[..., 1] = np.clip(biome[..., 1] + canopy * 0.55, 0, 1)
+biome[..., 0] = np.clip(biome[..., 0] + canopy * 0.3, 0, 1)
+biome8 = (biome[:BRES, :BRES] * 255).astype(np.uint8)
+
 print('fauna...')
 herds = []
 HERD_AREAS = {'savanna': 12, 'meadow': 3, 'coast': 2, 'lagoon': 2, 'forest': 3, 'peaks': 2, 'massif': 2, 'oasis': 2}
@@ -1282,6 +1594,26 @@ d0 = secs[0].paths[0].T[0]
 start = {'p': [float(hubs[0][0]), round(hub_y[0], 2), float(hubs[0][1])], 'dir': [float(d0[0]), float(d0[1])]}
 fe = secs[-1].paths[0].T[-1]
 finish = {'p': [float(hubs[-1][0]), round(hub_y[-1], 2), float(hubs[-1][1])], 'dir': [float(fe[0]), float(fe[1])], 'w': 200.0}
+def gate_at(p, sv, extra=40.0):
+    c, t, h = p.at_s(sv % p.L if p.L > 0 else sv)
+    return {'p': [round(float(c[0]), 1), round(float(h), 2), round(float(c[1]), 1)], 'dir': [round(float(t[0]), 4), round(float(t[1]), 4)],
+            'w': float(2 * p.hw + extra)}
+events, pads = [], []
+for ev in ev_secs:
+    p = ev.paths[0]
+    e = {'id': ev.key, 'name': ev.title, 'type': ev.kind, 'laps': ev.laps, 'length': round(p.L if ev.kind == 'circuit' else DRAG_LEN),
+         'route': route_of(p), 'gates': [gate_at(p, sv) for sv in ev.gates_s]}
+    if ev.kind == 'circuit':
+        st = gate_at(p, p.L - 70.0)
+    else:
+        st = gate_at(p, 25.0)
+        e['finish'] = gate_at(p, DRAG_LEN, 60.0)
+    e['start'] = {'p': st['p'], 'dir': st['dir']}
+    events.append(e)
+    for sv, lat in ev.pads:
+        c, t, h = p.at_s(sv); n = np.array([-t[1], t[0]]); q = c + n * lat
+        pads.append([round(float(q[0]), 1), round(float(h), 2), round(float(q[1]), 1), round(yaw_of(t[0], t[1]), 3)])
+
 sections = [{'key': s.code if hasattr(s, 'code') else s.key, 'title': s.area[3], 'biome': s.biome,
              'variants': [{'name': p.name, 'level': p.level, 'hw': p.hw, 'length': round(p.L), 'route': route_of(p)} for p in s.paths]} for s in secs]
 zones = [{'name': a[3], 'biome': a[4], 'c': [float(area_center(a[0], a[1])[0]), float(area_center(a[0], a[1])[1])]} for a in AREAS]
@@ -1329,7 +1661,7 @@ def runs(mask):
     return out
 
 problems = 0
-for k, s_ in enumerate(secs):
+for k, s_ in enumerate(all_secs):
     for p in s_.paths:
         sup = support_along(p)
         gap = p.h - sup
@@ -1390,6 +1722,7 @@ qstep = np.where(near_q, 1.0 / 64.0, 1.0 / 16.0).astype(np.float32)
 open(os.path.join(OUT, 'height.zst'), 'wb').write(zc.compress((np.round(H / CELL / qstep) * qstep).astype(np.float16).tobytes()))
 del occ_q, near_q, qstep
 open(os.path.join(OUT, 'biome.zst'), 'wb').write(zc.compress(biome8.tobytes()))
+open(os.path.join(OUT, 'veg.zst'), 'wb').write(zc.compress(veg_words.tobytes()))
 CH = 128
 nch = (RES - 1) // CH
 chunks = []
@@ -1402,8 +1735,14 @@ data = {'size': SIZE, 'res': RES, 'cell': CELL, 'ground': GROUND, 'water_y': WAT
         'start': start, 'finish': finish, 'checkpoints': checkpoints, 'sections': sections,
         'tunnels': tunnels, 'bridges': bridges, 'aqueducts': aqueducts, 'waters': waters, 'roofs': roofs,
         'props': props, 'grass': ground_cover['grass_tuft'], 'flowers': ground_cover['flowers'], 'ferns': ground_cover['fern'],
-        'islands': islands, 'banners': banners, 'herds': herds, 'colossi': colossi}
+        'islands': islands, 'banners': banners, 'herds': herds, 'colossi': colossi, 'events': events, 'pads': pads,
+        'veg_count': int(nveg), 'veg_types': VEG_TYPES}
 json.dump(data, open(os.path.join(OUT, 'map.json'), 'w'), separators=(',', ':'), ensure_ascii=False)
+# lista curta das corridas para o menu (sem ler o map.json inteiro)
+ev_menu = [{'id': 'grande', 'name': 'Grande Corrida', 'type': 'sprint', 'laps': 1,
+            'length': round(sum(min(v['length'] for v in sc['variants']) for sc in data['sections']))}]
+ev_menu += [{k: e[k] for k in ('id', 'name', 'type', 'laps', 'length')} for e in data['events']]
+json.dump(ev_menu, open(os.path.join(OUT, 'events.json'), 'w'), ensure_ascii=False, indent=1)
 
 # ------------------------------------------------------------------ minimapa
 MM = 2048
@@ -1428,6 +1767,7 @@ for wb in waters:
 col = np.where(in_water[..., None], np.array([70, 140, 190]) * (0.85 + 0.15 * shade[..., None]), col)
 img = Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).resize((MM, MM), Image.LANCZOS)
 dr = ImageDraw.Draw(img)
+dr.rectangle([0, 0, MM - 1, MM - 1], outline=(25, 18, 12), width=6)   # fora do mapa o minimapa fica escuro (sem riscas)
 def to_px(P):
     return [((x + HALF) / SIZE * MM, (z + HALF) / SIZE * MM) for x, z in P[::8]]
 LCOL = {0: (60, 230, 255), 1: (255, 255, 255), 2: (255, 160, 40), 3: (225, 240, 255)}
@@ -1443,6 +1783,11 @@ for lvl in (1, 3, 2, 0):
             else:
                 dr.line(pts, fill=(40, 25, 15), width=7)
                 dr.line(pts, fill=LCOL[lvl], width=3)
+for ev in ev_secs:
+    for p in ev.paths:
+        pts = to_px(p.P)
+        dr.line(pts, fill=(40, 25, 15), width=8)
+        dr.line(pts, fill=(255, 90, 200) if ev.kind == 'circuit' else (120, 255, 255), width=4)
 for k, hb in enumerate(hubs):
     x, y = (hb[0] + HALF) / SIZE * MM, (hb[1] + HALF) / SIZE * MM
     c = (80, 220, 90) if k == 0 else ((230, 60, 50) if k == len(hubs) - 1 else (255, 230, 120))

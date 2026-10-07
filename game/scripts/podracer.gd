@@ -23,6 +23,8 @@ const HB_GRIP := 0.35           # ...com a traseira solta (derrapa)
 const HB_DECEL := 7.0           # perde só um pouco de velocidade a derrapar
 const HB_DECEL_STRAIGHT := 14.0 # travão de mão a direito: trava mais
 const BOOST_MAX := 16.0         # m/s a mais depois de uma boa derrapagem
+const PAD_PUSH := 18.0          # m/s que uma placa de aceleração dá
+const SPEED_CAP := 160.0        # nunca passa disto (576 km/h), nem com placas e descidas
 const HOVER := 1.1
 const SPRING := 70.0
 const DAMP := 10.0
@@ -55,6 +57,14 @@ var _kappa := PackedFloat32Array()
 var _touches := {}
 var _t := 0.0
 var _air_time := 0.0
+# animação do corpo (molas): inclinação para a frente/trás, para os lados e suspensão
+var visual_pitch := 0.0          # + = nariz para cima
+var _pitch_v := 0.0
+var _roll := 0.0
+var _roll_v := 0.0
+var _heave := 0.0
+var _heave_v := 0.0
+var _ground_pitch := 0.0         # inclinação do chão entre a frente e a traseira
 
 @onready var model: Node3D = $Model
 
@@ -82,11 +92,32 @@ func place(pos: Vector3, dir: Vector2, start_speed: float) -> void:
 	rotation = Vector3(0.0, heading, 0.0)
 	ground_normal = Vector3.UP
 	model.basis = Basis()
+	visual_pitch = 0.0
+	_pitch_v = 0.0
+	_roll = 0.0
+	_roll_v = 0.0
+	_heave = 0.0
+	_heave_v = 0.0
+	_ground_pitch = 0.0
 	steer = 0.0
 	_route_i = _nearest_route(pos)
 
+# placa de aceleração no chão (circuitos e reta do sal)
+func pad_boost() -> void:
+	if not running:
+		return
+	boost = maxf(boost, BOOST_MAX * 1.4)
+	var f := forward()
+	var along := Vector3(vel.x, 0.0, vel.z).dot(f)
+	var push := clampf(MAX_SPEED + BOOST_MAX * 1.4 - along, 0.0, PAD_PUSH)   # placas seguidas não somam sem fim
+	vel.x += f.x * push
+	vel.z += f.z * push
+	_pitch_v += 0.6           # o nariz levanta com o empurrão
+	boosted.emit(boost)
+
 func set_route(r: Array) -> void:
 	route = r
+	_route_i = 0
 	_kappa.resize(route.size())
 	for i in route.size():
 		var a: Array = route[maxi(i - 2, 0)]
@@ -117,6 +148,12 @@ func _physics_process(dt: float) -> void:
 		ground_y = hit.position.y
 		ground_normal = ground_normal.lerp(hit.normal, 0.25).normalized()
 		on_water = hit.collider != null and hit.collider.has_meta("water")
+		# inclinação do chão: altura 6 m à frente e 6 m atrás (o corpo acompanha subidas e descidas)
+		var f6 := forward() * 6.0
+		var hf := _probe(space, global_position + f6)
+		var hb := _probe(space, global_position - f6)
+		if hf > -INF and hb > -INF:
+			_ground_pitch = atan2(hf - hb, 12.0)
 	var err := (ground_y + HOVER) - global_position.y
 	if running:
 		var v := speed()
@@ -138,12 +175,18 @@ func _physics_process(dt: float) -> void:
 				along = move_toward(along, top, ACCEL * 0.6 * dt)
 			else:
 				along = move_toward(along, top, ACCEL * (1.0 - 0.5 * clampf(along / MAX_SPEED, 0.0, 1.0)) * dt)
+		elif along > top:          # no ar o ar também trava um pouco o excesso
+			along = move_toward(along, top, ACCEL * 0.25 * dt)
+		along = minf(along, SPEED_CAP)
 		# travão de mão: a traseira solta-se e a velocidade continua para onde ia (derrapagem)
 		var grip := (HB_GRIP if braking else GRIP) * (1.0 if on_ground else 0.3)
 		side *= exp(-grip * dt)
-		# a velocidade lateral que se perde vira velocidade para a frente (derrapar não "trava")
+		# a velocidade lateral que se perde vira velocidade para a frente (derrapar não "trava"),
+		# mas nunca mais do que a velocidade com que se entrou (virar não pode dar velocidade)
 		var lost := side.length() * (1.0 - exp(-grip * dt))
+		var along_acc := along
 		along += lost * (0.85 if braking else 0.5)
+		along = minf(along, maxf(along_acc, sqrt(maxf(v * v - side.length_squared(), 0.0))))
 		vh = fwd * along + side
 		vel.x = vh.x
 		vel.z = vh.z
@@ -178,12 +221,22 @@ func _physics_process(dt: float) -> void:
 		on_ground = false
 	if on_ground and was_air and _air_time > 0.35 and vy_before < -8.0:
 		landed.emit(-vy_before)
+	if on_ground and was_air:   # a suspensão encolhe na aterragem e o nariz bate
+		_heave_v -= clampf(-vy_before * 0.12, 0.0, 6.0)
+		_pitch_v -= clampf(-vy_before * 0.02, 0.0, 1.2)
 	_air_time = 0.0 if on_ground else _air_time + dt
 	rotation = Vector3(0.0, heading, 0.0)
 	var before := vel
 	velocity = vel
 	move_and_slide()
 	vel = velocity
+	# deslizar numa encosta não pode transformar a queda em velocidade para a frente
+	var h_before := Vector2(before.x, before.z).length()
+	var h_after := Vector2(vel.x, vel.z).length()
+	if h_after > h_before + 0.05 and h_after > 0.0:
+		var k := (h_before + 0.05) / h_after
+		vel.x *= k
+		vel.z *= k
 	if running:
 		# bater não acaba a corrida: ressalta, desvia para o lado da parede e perde velocidade
 		var worst := 0.0
@@ -209,21 +262,40 @@ func _physics_process(dt: float) -> void:
 			scraped.emit(worst)
 	_update_visual(dt)
 
+func _probe(space: PhysicsDirectSpaceState3D, p: Vector3) -> float:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 6.0, 0), p + Vector3(0, -16.0, 0))
+	q.exclude = [get_rid()]
+	q.collision_mask = RIDE_MASK
+	var h := space.intersect_ray(q)
+	return h.position.y if not h.is_empty() else -INF
+
 func _update_visual(dt: float) -> void:
-	# inclinação no espaço local do corpo (o corpo só gira em Y com o rumo)
+	# o corpo do veículo é animado com molas (o corpo físico só gira em Y com o rumo):
+	# - no chão o nariz segue a inclinação entre a frente e a traseira; no ar segue a trajetória
+	# - inclina-se para dentro das curvas e acompanha o declive lateral
+	# - a suspensão encolhe nas aterragens e o veículo balança um pouco
 	var lat := vel.dot(forward().cross(Vector3.UP))
 	steer_visual = lerpf(steer_visual, clampf(steer * 0.7 + lat / 40.0, -1.0, 1.0), 1.0 - exp(-dt * 6.0))
-	var up := (ground_normal if on_ground else Vector3.UP)
-	up = (Basis(Vector3.UP, -heading) * up).normalized()
-	var x := up.cross(Vector3.BACK).normalized()
-	var target := Basis(x, up, x.cross(up).normalized())
-	target = target * Basis(Vector3.BACK, steer_visual * 0.4)
+	var hspeed := Vector2(vel.x, vel.z).length()
+	var tp: float
+	if on_ground:
+		tp = _ground_pitch * 1.15
+	else:
+		tp = atan2(vel.y, maxf(hspeed, 12.0)) * 0.9
 	if braking and running:
-		target = target * Basis(Vector3.RIGHT, 0.06)   # nariz levanta ao travar
-	if not on_ground:
-		target = target * Basis(Vector3.RIGHT, clampf(vel.y / 60.0, -0.35, 0.35))
-	model.basis = model.basis.slerp(target.orthonormalized(), 1.0 - exp(-dt * 8.0)).orthonormalized()
-	model.position = model.basis * MODEL_OFFSET + Vector3(0.0, sin(_t * 9.0) * 0.05, 0.0)
+		tp += 0.06                      # nariz levanta ao travar
+	tp = clampf(tp, -0.75, 0.75)
+	_pitch_v += ((tp - visual_pitch) * 70.0 - _pitch_v * 10.0) * dt
+	visual_pitch += _pitch_v * dt
+	var lup := (Basis(Vector3.UP, -heading) * ground_normal).normalized() if on_ground else Vector3.UP
+	var tr := steer_visual * 0.4 - atan2(lup.x, lup.y)
+	_roll_v += ((tr - _roll) * 55.0 - _roll_v * 9.0) * dt
+	_roll += _roll_v * dt
+	_heave_v += (-_heave * 90.0 - _heave_v * 9.0) * dt
+	_heave = clampf(_heave + _heave_v * dt, -1.2, 0.8)
+	model.basis = (Basis(Vector3.RIGHT, visual_pitch) * Basis(Vector3.BACK, _roll)).orthonormalized()
+	var bob := sin(_t * 9.0) * 0.05 + sin(_t * 23.0) * 0.02 * speed_fraction() if on_ground else sin(_t * 4.0) * 0.08
+	model.position = model.basis * MODEL_OFFSET + Vector3(0.0, _heave + bob, 0.0)
 
 # ------------------------------------------------------------------ entrada
 func _unhandled_input(e: InputEvent) -> void:
@@ -279,10 +351,21 @@ func _avoid(v: float) -> float:
 		push += (1.0 if lat > 0.0 else -1.0) * (0.6 + 1.6 * k)
 	return clampf(push, -2.0, 2.0)
 
+## Ponto do caminho mais perto, procurado primeiro à volta de onde já se ia: nos circuitos a rota
+## repete as voltas e a largada fica junto ao fim de cada volta (não pode saltar uma volta à frente).
 func _nearest_route(p: Vector3) -> int:
-	var best := 0
+	if route.is_empty():
+		return 0
+	var best := _scan_route(p, maxi(_route_i - 150, 0), mini(_route_i + 600, route.size()))
+	var r: Array = route[best]
+	if Vector2(r[0] - p.x, r[2] - p.z).length() > 150.0:
+		best = _scan_route(p, 0, route.size())
+	return best
+
+func _scan_route(p: Vector3, a: int, b: int) -> int:
+	var best := a
 	var bd := INF
-	for i in range(0, route.size(), 2):
+	for i in range(a, b):
 		var r: Array = route[i]
 		var d := Vector2(r[0] - p.x, r[2] - p.z).length_squared()
 		if d < bd:
@@ -312,7 +395,7 @@ func _autopilot() -> void:
 	# curvas fechadas: puxa o travão de mão (derrapa) quando a curva logo à frente é mais apertada
 	# do que o veículo consegue fazer a esta velocidade
 	braking = false
-	for j in range(1, 10):
+	for j in range(1, 10 + int(v / 12.0)):   # mais rápido = olha mais longe
 		var idx := mini(_route_i + j, route.size() - 1)
 		var kap := _kappa[idx] if idx < _kappa.size() else 0.0
 		if v * kap > turn_rate(v) * 0.85 and absf(diff) > 0.04:

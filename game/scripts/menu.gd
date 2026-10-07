@@ -9,6 +9,8 @@ var font_body: FontVariation
 var main_box: VBoxContainer
 var lobby_box: VBoxContainer
 var join_box: VBoxContainer
+var races_box: VBoxContainer
+var event_btn: Button
 var name_edit: LineEdit
 var ip_edit: LineEdit
 var lobby_list: Label
@@ -19,6 +21,8 @@ var hosts_box: VBoxContainer
 var status_lbl: Label
 var loading_lbl: Label
 var args := {}
+# corridas: a grande (A até B, por todas as zonas) e as curtas geradas em map.json
+var events: Array = [{"id": "grande", "name": "Grande Corrida", "type": "sprint", "laps": 1, "length": 119000.0}]
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -36,6 +40,8 @@ func _ready() -> void:
 	Net.loading.connect(_show_loading)
 	if args.has("mode"):
 		Net.mode = String(args["mode"])
+	if args.has("event"):
+		Net.event = String(args["event"])
 	if Net.online:      # voltou de uma corrida PvP: fica na sala de espera
 		_show(lobby_box)
 		_refresh_lobby()
@@ -47,7 +53,9 @@ func _ready() -> void:
 		Net.my_name = String(args.get("name", "Convidado"))
 		_show(join_box)
 		Net.join_game(String(args["join"]))
-	elif args.has("menushot"):   # teste: fotografa o menu e sai
+	elif args.has("menushot"):   # teste: fotografa o menu e sai (--races: o submenu das corridas)
+		if args.has("races"):
+			_show(races_box)
 		get_tree().create_timer(1.5).timeout.connect(func():
 			get_viewport().get_texture().get_image().save_png(String(args["menushot"]))
 			get_tree().quit())
@@ -119,7 +127,47 @@ func _box() -> VBoxContainer:
 	add_child(v)
 	return v
 
+func _load_events() -> void:
+	var f := FileAccess.open("res://assets/map/events.json", FileAccess.READ)
+	if f == null:
+		return
+	var d = JSON.parse_string(f.get_as_text())
+	if d is Array and not d.is_empty():
+		events = d
+
+func _event_name(id: String) -> String:
+	for e in events:
+		if e.id == id:
+			return String(e.name).to_upper()
+	return id.to_upper()
+
+func _event_text(e: Dictionary) -> String:
+	var km := float(e.length) / 1000.0
+	var info := ""
+	if e.type == "circuit":
+		info = "%d voltas · %s km" % [int(e.laps), ("%.1f" % km).replace(".", ",")]
+	elif e.type == "drag":
+		info = "arranque · %d m" % int(e.length)
+	else:
+		info = "de A até B · %d km" % int(round(km))
+	var cfg := ConfigFile.new()
+	if cfg.load("user://save.cfg") == OK:
+		var b := float(cfg.get_value("race_v6", String(e.id), 0.0))
+		if b > 0.0:
+			info += " · recorde %s" % _fmt(b)
+	return "%s   (%s)" % [String(e.name).to_upper(), info]
+
+static func _fmt(t: float) -> String:
+	var h := int(t / 3600.0)
+	var m := int(t / 60.0) % 60
+	var sec := int(t) % 60
+	var c := int((t - floor(t)) * 100.0)
+	if h > 0:
+		return "%d:%02d:%02d,%02d" % [h, m, sec, c]
+	return "%02d:%02d,%02d" % [m, sec, c]
+
 func _build() -> void:
+	_load_events()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg := TextureRect.new()
 	bg.texture = preload("res://assets/ui/menu_bg.jpg")
@@ -148,7 +196,7 @@ func _build() -> void:
 	name_edit.text_changed.connect(func(t): Net.my_name = t)
 	main_box.add_child(name_edit)
 	main_box.add_child(_button("EXPLORAR O MUNDO", _on_solo.bind("explorar"), Color("#5fe06a")))
-	main_box.add_child(_button("CIRCUITO DE A ATÉ B", _on_solo.bind("corrida")))
+	main_box.add_child(_button("CORRIDAS", func(): _show(races_box)))
 	main_box.add_child(_button("JOGAR A DOIS: CRIAR", _on_host, Color("#7ff6ff")))
 	main_box.add_child(_button("JOGAR A DOIS: ENTRAR", _on_join_screen, Color("#7ff6ff")))
 	# sala de espera (anfitrião e convidados)
@@ -160,9 +208,24 @@ func _build() -> void:
 	lobby_box.add_child(lobby_list)
 	explore_btn = _button("EXPLORAR JUNTOS", func(): Net.start_race("explorar"), Color("#5fe06a"))
 	lobby_box.add_child(explore_btn)
-	start_btn = _button("CORRIDA DE A ATÉ B", func(): Net.start_race("corrida"))
+	event_btn = _button("", _next_event, Color("#ff8ad8"))
+	lobby_box.add_child(event_btn)
+	start_btn = _button("COMEÇAR A CORRIDA", func(): Net.start_race("corrida", Net.event))
 	lobby_box.add_child(start_btn)
 	lobby_box.add_child(_button("SAIR", _on_leave, Color("#ff6a5a")))
+	# escolher a corrida (sozinho)
+	races_box = _box()
+	races_box.add_theme_constant_override("separation", 12)
+	for e in events:
+		var col := Color("#ffb347")
+		if e.type == "circuit":
+			col = Color("#ff8ad8")
+		elif e.type == "drag":
+			col = Color("#7ff6ff")
+		var b := _button(_event_text(e), _on_race.bind(String(e.id)), col)
+		b.add_theme_font_size_override("font_size", 30)
+		races_box.add_child(b)
+	races_box.add_child(_button("VOLTAR", func(): _show(main_box), Color("#ff6a5a")))
 	# procurar corridas
 	join_box = _box()
 	join_box.add_child(_label("Jogos encontrados no mesmo Wi-Fi:", 28))
@@ -190,7 +253,7 @@ func _show_loading() -> void:
 	loading_lbl.visible = true
 
 func _show(box: Control) -> void:
-	for b in [main_box, lobby_box, join_box]:
+	for b in [main_box, lobby_box, join_box, races_box]:
 		b.visible = b == box
 
 # ------------------------------------------------------------------ ações
@@ -201,6 +264,19 @@ func _on_solo(m: String) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+func _on_race(id: String) -> void:
+	Net.event = id
+	_on_solo("corrida")
+
+## Anfitrião: troca a corrida que vão fazer juntos.
+func _next_event() -> void:
+	var i := 0
+	for k in events.size():
+		if events[k].id == Net.event:
+			i = k
+	Net.event = String(events[(i + 1) % events.size()].id)
+	_refresh_lobby()
 
 func _on_host() -> void:
 	if Net.host_game():
@@ -253,7 +329,10 @@ func _refresh_lobby() -> void:
 			b.disabled = not ready
 		explore_btn.text = "EXPLORAR JUNTOS" if ready else "À ESPERA DE JOGADORES..."
 		start_btn.visible = ready
+		event_btn.visible = ready
+		event_btn.text = "PISTA: %s  ▸" % _event_name(Net.event)
 	else:
 		lobby_info.text = "Na sala de espera. O anfitrião escolhe: explorar juntos ou corrida."
 		explore_btn.visible = false
 		start_btn.visible = false
+		event_btn.visible = false

@@ -47,15 +47,15 @@ func setup(info: Dictionary) -> void:
 	material.set_shader_parameter("skirt", SKIRT)
 	material.set_shader_parameter("water_y", float(info.water_y))
 	apply_biome(material, info)
-	# superfícies de água (até 16): centro/meia-largura e rotação, para escurecer o fundo
+	# superfícies de água (até 24): centro/meia-largura e rotação, para escurecer o fundo
 	var rects := PackedVector4Array()
 	var rots := PackedVector4Array()
 	for w in info.waters:
-		if rects.size() >= 16:
+		if rects.size() >= 24:
 			break
 		rects.append(Vector4(w.c[0], w.c[1], w.sx, w.sz))
 		rots.append(Vector4(cos(w.yaw), sin(w.yaw), w.y, 0.0))
-	while rects.size() < 16:
+	while rects.size() < 24:
 		rects.append(Vector4(0, 0, -1, -1))
 		rots.append(Vector4(1, 0, 0, 0))
 	material.set_shader_parameter("water_rects", rects)

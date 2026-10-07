@@ -8,6 +8,7 @@ var _yaw := 0.0
 var _shake := 0.0
 var _kick := 0.0
 var _t := 0.0
+var _pitch := 0.0
 
 func snap() -> void:
 	_yaw = player.heading
@@ -38,9 +39,11 @@ func _process(dt: float) -> void:
 		var back := Vector3(sin(_yaw), 0.0, cos(_yaw))
 		var dist := lerpf(19.0, 16.0, f)
 		var height := lerpf(5.4, 4.3, f)
-		var target := p + back * dist + Vector3(0, height, 0)
+		# a câmara acompanha a inclinação: sobe atrás nas descidas e olha para cima nas subidas
+		_pitch = lerpf(_pitch, clampf(player.visual_pitch, -0.6, 0.6), 1.0 - exp(-dt * 4.0)) if dt > 0.0 else player.visual_pitch
+		var target := p + back * dist * cos(_pitch * 0.7) + Vector3(0, height - sin(_pitch * 0.7) * dist, 0)
 		global_position = global_position.lerp(target, 1.0 - exp(-dt * 12.0)) if dt > 0.0 else target
-		var look := p - back * 26.0 + Vector3(0, 2.4, 0)
+		var look := p - back * 26.0 + Vector3(0, 2.4 + tan(_pitch * 0.6) * 26.0, 0)
 		look_at(look, Vector3.UP)
 		rotate_object_local(Vector3.BACK, player.steer_visual * deg_to_rad(4.0))
 		fov = lerpf(72.0, 90.0, f)

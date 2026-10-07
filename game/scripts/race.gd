@@ -1,19 +1,19 @@
 extends Node3D
-## Mundo de 24 km com dois modos, sozinho ou PvP local (vários telemóveis na mesma rede):
+## Mundo de 24 km, sozinho ou PvP local (vários telemóveis na mesma rede):
 ##  - EXPLORAR: andar à vontade, sem relógio; o MAPA permite viajar para qualquer sítio.
-##  - CORRIDA: circuito de A até B que passa por todas as zonas, com portões em ordem e
-##    vários caminhos/atalhos em cada trecho.
+##  - CORRIDAS (provas): a grande corrida de A até B por todas as zonas (portões em ordem, vários
+##    caminhos/atalhos em cada trecho), dois circuitos com voltas e uma reta de arranque (drag).
 ## Bater não pára; ao cair num abismo volta-se ao caminho mais perto de onde se estava.
 ##
 ## Argumentos de teste (depois de `--`):
-##   --mode=explorar|corrida  --autoplay  --variant=N|sorte  --log  --shots=2,6  --shotdir=/caminho
+##   --mode=explorar|corrida  --event=grande|floresta|monumentos|drag  --autoplay  --variant=N|sorte  --log  --shots=2,6  --shotdir=/caminho
 ##   --quit=SEG  --cp=N (começa no portão N)  --at=x,z,dx,dz[,y]  --fpv  --nohud  --travel=x,z  --openmap=SEG
 
 enum State { WAIT, COUNTDOWN, RACE, FINISHED, FREE }
 
 const RemoteRacer = preload("res://scripts/remote_racer.gd")
 const SAVE_PATH := "user://save.cfg"
-const SAVE_KEY := "race_v5"
+const SAVE_KEY := "race_v6"
 const SUN_AZIMUTH := 35.0
 const SUN_ELEVATION := 42.0
 const HINT := "Esquerda do ecrã: virar   ·   direita: TRAVÃO DE MÃO (travar + virar = derrapar)"
@@ -45,6 +45,8 @@ var _safe: Array = []              # últimas posições seguras [[pos, heading]
 var _safe_t := 0.0
 var _zone := -1
 var _hint_t := 0.0
+var ev: Dictionary = {}            # prova escolhida (ver _make_event)
+var cps: Array = []                # portões pela ordem em que se passam (nos circuitos repetem-se a cada volta)
 
 @onready var terrain = $Terrain
 @onready var map = $Map
@@ -65,10 +67,19 @@ func _ready() -> void:
 	var to_sun := Vector3(sin(az) * cos(el), sin(el), -cos(az) * cos(el))
 	sun.global_transform = Transform3D(Basis.looking_at(-to_sun, Vector3.UP), Vector3.ZERO)
 	info = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map/map.json"))
+	ev = _make_event(String(args.get("event", Net.event)))
+	for lap in int(ev.laps):
+		for i in ev.gates.size():
+			var g: Dictionary = ev.gates[i].duplicate()
+			g["phys"] = i
+			cps.append(g)
 	terrain.setup(info)
 	terrain.focus = cam
 	map.player = player
+	map.event = ev
+	map.explore = explore
 	map.setup(info, terrain)
+	map.pad_hit.connect(func(): player.pad_boost())
 	map.checkpoint_passed.connect(_on_checkpoint)
 	map.finish_passed.connect(_on_finish)
 	hud.map_size = float(info.size)
@@ -79,16 +90,19 @@ func _ready() -> void:
 	hud.travel_requested.connect(_travel)
 	hud.set_mode(explore)
 	hud.zones = info.zones
-	for c in info.checkpoints:
+	for c in ev.gates:
 		hud.gates.append(Vector2(c.p[0], c.p[2]))
-	hud.gates.append(Vector2(info.finish.p[0], info.finish.p[2]))
+	if not ev.finish.is_empty():
+		hud.gates.append(Vector2(ev.finish.p[0], ev.finish.p[2]))
+	for e in (info.get("events", []) if explore else []):
+		hud.event_marks.append([Vector2(e.start.p[0], e.start.p[2]), String(e.name), Color("#ff5ac8") if e.type == "circuit" else Color("#78ffff")])
 	player.set_route(_build_route())
 	player.autopilot = args.has("autoplay")
 	player.crashed.connect(_on_fall)
 	player.scraped.connect(_on_scrape)
 	player.landed.connect(_on_land)
 	player.boosted.connect(_on_boost)
-	var st: Dictionary = info.start
+	var st: Dictionary = ev.start
 	var start_pos := Vector3(st.p[0], st.p[1], st.p[2])
 	var start_dir := Vector2(st.dir[0], st.dir[1])
 	if mp:   # grelha de partida lado a lado
@@ -120,7 +134,7 @@ func _ready() -> void:
 		state = State.WAIT
 	if args.has("cp"):
 		next_cp = int(args["cp"])
-		var c: Dictionary = info.checkpoints[next_cp - 1]
+		var c: Dictionary = cps[next_cp - 1]
 		player.place(Vector3(c.p[0], c.p[1], c.p[2]), Vector2(c.dir[0], c.dir[1]), 0.0)
 	else:
 		player.place(start_pos, start_dir, 0.0)
@@ -139,7 +153,7 @@ func _ready() -> void:
 	audio = preload("res://scripts/audio.gd").new()
 	add_child(audio)
 	best = _load_best()
-	map.highlight(-1 if explore else next_cp)
+	map.highlight(-1 if explore else (int(cps[next_cp].phys) if next_cp < cps.size() else -2), ev.type != "circuit")
 	map.warmup(cam)
 	_measure_gates()
 	if args.has("nohud"):
@@ -166,8 +180,27 @@ func _ready() -> void:
 	hooks.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(hooks)
 
+## A prova escolhida, num formato comum: {id, name, type (sprint/circuit/drag), laps, start, gates, finish}.
+## "grande" é a corrida de A até B por todas as zonas; as outras vêm de info.events.
+func _make_event(id: String) -> Dictionary:
+	if not explore:
+		for e in info.get("events", []):
+			if e.id == id:
+				var out: Dictionary = e.duplicate()
+				out["half_w"] = 46.0 if e.type == "drag" else 34.0
+				if not out.has("finish"):
+					out["finish"] = {}
+				return out
+	return {"id": "grande", "name": "Grande Corrida", "type": "sprint", "laps": 1, "start": info.start,
+		"gates": info.checkpoints, "finish": info.finish, "half_w": 46.0, "route": []}
+
 ## Rota do piloto automático (testes): escolhe um caminho por trecho com --variant=N ou --variant=sorte.
 func _build_route() -> Array:
+	if ev.id != "grande":   # circuitos: a volta repetida; drag: a reta
+		var r: Array = []
+		for lap in int(ev.laps):
+			r.append_array(ev.route if r.is_empty() else ev.route.slice(1))
+		return r
 	var out: Array = []
 	var v = args.get("variant", "0")
 	for sec in info.sections:
@@ -218,7 +251,7 @@ func _process(dt: float) -> void:
 			if t_count <= 0.6 and state == State.COUNTDOWN:
 				state = State.RACE
 				player.running = true
-				hud.set_center("JÁ!", info.sections[0].title)
+				hud.set_center("JÁ!", info.sections[0].title if ev.id == "grande" else ev.name)
 				audio.beep(true)
 				audio.start_run()
 		State.RACE, State.FREE:
@@ -242,7 +275,7 @@ func _process(dt: float) -> void:
 			_check_stuck(dt)
 	var target := _next_target()
 	hud.set_nav(p, player.heading, target, not explore)
-	hud.set_race(t_race, best, next_cp, info.checkpoints.size(), player.speed() * 3.6)
+	hud.set_race(t_race, best, next_cp, cps.size(), player.speed() * 3.6, _race_label())
 	var cave: bool = map.in_cave(p)
 	# dentro da gruta / sob o teto de pedra a luz ambiente cai (fica mais escuro)
 	env.ambient_light_energy = move_toward(env.ambient_light_energy, 0.28 if cave else 0.7, dt * 1.2)
@@ -259,8 +292,8 @@ func _process(dt: float) -> void:
 		for id in remotes:
 			print("   adversário %s: progresso %.2f  pos=%s" % [_pname(id), remotes[id].progress, remotes[id].global_position.round()])
 	if args.has("log") and int(elapsed * 2.0) != int((elapsed - dt) * 2.0):
-		print("t=%.1f  pos=(%d,%d,%d)  v=%d km/h  chão=%s  portão=%d  estado=%d%s" % [t_race, p.x, p.y, p.z, player.speed() * 3.6,
-			player.on_ground, next_cp, state, ("  deriva" if player.drifting else "")])
+		print("t=%.1f  pos=(%d,%d,%d)  v=%d km/h  chão=%s  portão=%d  estado=%d  nariz=%d°%s" % [t_race, p.x, p.y, p.z, player.speed() * 3.6,
+			player.on_ground, next_cp, state, roundi(rad_to_deg(player.visual_pitch)), ("  deriva" if player.drifting else "")])
 
 ## Testes: fotografias, abrir o mapa e sair (corre mesmo com o jogo em pausa).
 class TestHooks extends Node:
@@ -283,21 +316,35 @@ func _test_hooks(t: float) -> void:
 		get_viewport().get_texture().get_image().save_png(path)
 		print("PRINT ", path, "  portão=", next_cp, "  t=", snappedf(t_race, 0.1), "  fps=", Engine.get_frames_per_second())
 	if args.has("quit") and t >= float(args["quit"]):
-		print("FIM  portão=", next_cp, "/", info.checkpoints.size(), "  t=", snappedf(t_race, 0.1), "  estado=", state)
+		print("FIM  portão=", next_cp, "/", cps.size(), "  t=", snappedf(t_race, 0.1), "  estado=", state)
 		get_tree().quit()
 
 func _next_target() -> Vector3:
-	if next_cp < info.checkpoints.size():
-		return map.checkpoints[next_cp].pos
-	var f: Dictionary = info.finish
+	if next_cp < cps.size():
+		return map.checkpoints[int(cps[next_cp].phys)].pos
+	var f: Dictionary = ev.finish if not ev.finish.is_empty() else ev.start
 	return Vector3(f.p[0], f.p[1], f.p[2])
 
 func _gate_pos(i: int) -> Vector3:
-	var d: Dictionary = info.start if i == 0 else (info.checkpoints[i - 1] if i <= info.checkpoints.size() else info.finish)
+	var d: Dictionary = ev.start if i == 0 else (cps[i - 1] if i <= cps.size() else (ev.finish if not ev.finish.is_empty() else ev.start))
 	return Vector3(d.p[0], d.p[1], d.p[2])
 
+## Texto do canto: portão, ou volta e portão nos circuitos, ou a distância que falta no drag.
+func _race_label() -> String:
+	if ev.type == "circuit":
+		var n: int = ev.gates.size()
+		if next_cp >= cps.size():
+			return "CHEGADA!"
+		return "VOLTA %d/%d  ·  %d/%d" % [mini(next_cp / n + 1, int(ev.laps)), int(ev.laps), next_cp % n + 1, n]
+	if ev.type == "drag":
+		var f: Dictionary = ev.finish
+		var d := Vector2(f.p[0] - player.global_position.x, f.p[2] - player.global_position.z).length()
+		var nm := String(ev.name).to_upper()
+		return "%s  ·  faltam %d m" % [nm, int(d)] if state != State.FINISHED else nm
+	return ""
+
 func _measure_gates() -> void:
-	for i in info.checkpoints.size() + 1:
+	for i in cps.size() + 1:
 		_gate_len.append(_gate_pos(i).distance_to(_gate_pos(i + 1)))
 
 ## Progresso na corrida (portões passados + fração até ao próximo), para ordenar os jogadores.
@@ -309,20 +356,33 @@ func progress() -> float:
 
 # ------------------------------------------------------------------ portões e chegada
 func _on_checkpoint(i: int) -> void:
-	if state != State.RACE or i != next_cp:
+	if state != State.RACE or next_cp >= cps.size() or int(cps[next_cp].phys) != i:
 		return
 	next_cp += 1
-	map.highlight(next_cp)
+	map.highlight(int(cps[next_cp].phys) if next_cp < cps.size() else -2, ev.type != "circuit")
 	audio.checkpoint()
-	var zone: String = info.sections[mini(i + 1, info.sections.size() - 1)].title
-	hud.set_center("", "PORTÃO %d  ·  %s" % [i + 1, hud.fmt_time(t_race)], zone)
+	if ev.type == "circuit" and next_cp >= cps.size():
+		_finish_race()
+		return
+	if ev.type == "circuit":
+		var n: int = ev.gates.size()
+		if next_cp % n == 0:
+			hud.set_center("VOLTA %d" % (next_cp / n + 1), hud.fmt_time(t_race), "ÚLTIMA VOLTA!" if next_cp / n + 1 == int(ev.laps) else "")
+		else:
+			hud.set_center("", "PORTÃO %d/%d  ·  %s" % [next_cp % n, n, hud.fmt_time(t_race)])
+	else:
+		var zone: String = info.sections[mini(i + 1, info.sections.size() - 1)].title
+		hud.set_center("", "PORTÃO %d  ·  %s" % [i + 1, hud.fmt_time(t_race)], zone)
 	get_tree().create_timer(1.4).timeout.connect(func():
 		if state == State.RACE and respawn_timer < 0.0:
 			hud.set_center(""))
 
 func _on_finish() -> void:
-	if state != State.RACE or next_cp < info.checkpoints.size():
+	if state != State.RACE or next_cp < cps.size():
 		return
+	_finish_race()
+
+func _finish_race() -> void:
 	state = State.FINISHED
 	player.running = false
 	audio.finish()
@@ -461,7 +521,7 @@ func respawn(at_gate := false) -> void:
 			pos = s[0]
 			dir = Vector2(-sin(s[1]), -cos(s[1]))
 	else:
-		var g: Dictionary = info.start if next_cp == 0 or explore else info.checkpoints[next_cp - 1]
+		var g: Dictionary = ev.start if next_cp == 0 or explore else cps[next_cp - 1]
 		pos = Vector3(g.p[0], 0.0, g.p[2])
 		pos.y = terrain.height_at(pos.x, pos.z)
 		dir = Vector2(g.dir[0], g.dir[1])
@@ -551,10 +611,11 @@ func _adapt_quality(dt: float) -> void:
 func _load_best() -> float:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
-		return float(cfg.get_value(SAVE_KEY, "best", 0.0))
+		return float(cfg.get_value(SAVE_KEY, String(ev.id), 0.0))
 	return 0.0
 
 func _save_best() -> void:
 	var cfg := ConfigFile.new()
-	cfg.set_value(SAVE_KEY, "best", best)
+	cfg.load(SAVE_PATH)
+	cfg.set_value(SAVE_KEY, String(ev.id), best)
 	cfg.save(SAVE_PATH)

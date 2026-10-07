@@ -12,8 +12,8 @@ uniform float half_size = 3072.0;
 uniform int res = 1537;
 uniform float skirt = 30.0;
 uniform float water_y = 0.0;
-uniform vec4 water_rects[16];   // centro x, z, meia-largura x, z (rodado por water_rots)
-uniform vec4 water_rots[16];    // cos, sen da rotação, altura da água
+uniform vec4 water_rects[24];   // centro x, z, meia-largura x, z (rodado por water_rots)
+uniform vec4 water_rots[24];    // cos, sen da rotação, altura da água
 uniform vec3 sand_a : source_color = vec3(0.90, 0.76, 0.56);
 uniform vec3 sand_b : source_color = vec3(0.82, 0.66, 0.46);
 uniform vec3 sand_dark : source_color = vec3(0.66, 0.50, 0.36);
@@ -71,7 +71,7 @@ void fragment() {
 	// debaixo de água: mais escuro e esverdeado
 	float under = 1.0 - smoothstep(water_y - 6.0, water_y + 0.3, wpos.y);
 	float wet = 0.0;
-	for (int i = 0; i < 16; i++) {
+	for (int i = 0; i < 24; i++) {
 		vec4 r = water_rects[i];
 		if (r.z < 0.0) break;
 		vec2 d = p - r.xy;

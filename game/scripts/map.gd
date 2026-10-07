@@ -7,6 +7,7 @@ extends Node3D
 
 signal checkpoint_passed(index: int)
 signal finish_passed
+signal pad_hit
 
 const CELL_GROUP := 1024.0       # peças agrupadas em quadrados de 1 km (um MultiMesh por tipo)
 const COVER_GROUP := 256.0       # relva/flores em quadrados mais pequenos (vêem-se só de perto)
@@ -46,6 +47,10 @@ var _shapes: Array = []          # formas criadas aqui: guardar a referência (s
 var _warm: Node3D
 var _warm_frames := 0
 var _space: RID
+## Prova escolhida: {id, name, type, laps, start, gates (portões físicos), finish (ou {})}. Em exploração
+## é a grande corrida (os seus portões ficam como marcos) e as outras provas mostram só o pórtico de partida.
+var event: Dictionary = {}
+var explore := false
 
 func setup(map_info: Dictionary, t: Node) -> void:
 	info = map_info
@@ -69,6 +74,10 @@ func setup(map_info: Dictionary, t: Node) -> void:
 	_place_colossi()
 	_place_checkpoints()
 	_place_route_posts()
+	_place_pads()
+	var t3 := Time.get_ticks_msec()
+	_place_veg()
+	print("vegetação: %d ms" % (Time.get_ticks_msec() - t3))
 	print("mapa: peças %d ms, cenário %d ms, resto %d ms" % [t1 - t0, t2 - t1, Time.get_ticks_msec() - t2])
 
 func _exit_tree() -> void:
@@ -209,7 +218,7 @@ func _place_set_pieces() -> void:
 	for t in info.tunnels:
 		var pos := Vector3(t.p[0], t.p[1], t.p[2])
 		_place_static(t.name, Transform3D(Basis(Vector3.UP, t.yaw), pos), rock_mat, true)
-		_cave(pos, t.yaw, float(t.len), 19.0, pos.y + 16.0)
+		_cave(pos, t.yaw, float(t.len), float(t.get("thw", 18.0)) + 1.0, pos.y + 16.0)
 	# pontes de pedra
 	for b in info.bridges:
 		_place_static(b.name, Transform3D(Basis(Vector3.UP, b.yaw), Vector3(b.p[0], b.p[1], b.p[2])), rock_mat)
@@ -234,37 +243,53 @@ func _place_set_pieces() -> void:
 		var fwd := Vector3(-sin(r.yaw), 0.0, -cos(r.yaw))
 		_place_static("canyon_roof", _xf(rp - fwd * 90.0, r.yaw, 1.0), rock_mat_dark, true)
 		_cave(rp - fwd * 90.0, r.yaw, 180.0, 40.0, rp.y + 24.0)
-	# portais de largada e chegada (arco largo por cima da estrada)
-	for spec in [[info.start, "LARGADA", 30.0], [info.finish, "META", 0.0]]:
-		var d: Dictionary = spec[0]
-		var dir := Vector3(d.dir[0], 0, d.dir[1])
-		var pos := Vector3(d.p[0], d.p[1], d.p[2]) + dir * float(spec[2])
-		var yaw := atan2(-d.dir[0], -d.dir[1])
-		var gm := MeshInstance3D.new()
-		gm.mesh = _prop("gate").mesh
-		gm.transform = Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3(7.6, 3.6, 3.6)), pos)
-		add_child(gm)
-		var gb := _new_body(1)
-		var side := Vector3(-dir.z, 0, dir.x)
-		var cyl := CylinderShape3D.new()
-		cyl.radius = 6.0
-		cyl.height = 40.0
-		_shapes.append(cyl)
-		for sg in [-1.0, 1.0]:
-			PhysicsServer3D.body_add_shape(gb, cyl.get_rid(), Transform3D(Basis(), pos + side * sg * 47.0 + Vector3(0, 20, 0)))
-		var lbl := Label3D.new()
-		lbl.text = spec[1]
-		lbl.font_size = 512
-		lbl.pixel_size = 0.03
-		lbl.outline_size = 48
-		lbl.modulate = Color("#ffd36e")
-		lbl.outline_modulate = Color("#3a1d10")
-		lbl.position = pos + Vector3(0, 58, 0)
-		lbl.rotation.y = yaw
-		lbl.visibility_range_end = 2500.0
-		add_child(lbl)
-	var fin: Dictionary = info.finish
-	_add_trigger(Vector3(fin.p[0], fin.p[1], fin.p[2]), Vector2(fin.dir[0], fin.dir[1]), float(fin.w), -1)
+	# pórticos de partida e chegada (arco largo por cima da estrada)
+	var hw := float(event.get("half_w", 46.0))
+	if event.type == "circuit":
+		var g: Dictionary = event.gates[-1]
+		_portal(g, event.name.to_upper(), 0.0, hw)
+	else:
+		_portal(event.start, "LARGADA", 30.0, hw)
+	if not event.get("finish", {}).is_empty():
+		var fin: Dictionary = event.finish
+		_portal(fin, "META", 0.0, hw)
+		_add_trigger(Vector3(fin.p[0], fin.p[1], fin.p[2]), Vector2(fin.dir[0], fin.dir[1]), float(fin.w), -1)
+	if explore:   # as outras provas: só o pórtico com o nome, para se encontrarem a explorar
+		for e in info.get("events", []):
+			if e.id == event.id:
+				continue
+			var ehw := 46.0 if e.type == "drag" else 34.0
+			_portal(e.gates[-1] if e.type == "circuit" else e.start, String(e.name).to_upper(), 0.0 if e.type == "circuit" else 30.0, ehw)
+
+func _portal(d: Dictionary, text: String, ahead: float, half_w: float) -> void:
+	var dir := Vector3(d.dir[0], 0, d.dir[1]).normalized()
+	var pos := Vector3(d.p[0], d.p[1], d.p[2]) + dir * ahead
+	var yaw := atan2(-dir.x, -dir.z)
+	var span := (half_w + 6.0) / 47.0
+	var gm := MeshInstance3D.new()
+	gm.mesh = _prop("gate").mesh
+	gm.transform = Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3(7.6 * span, 3.6, 3.6)), pos)
+	gm.visibility_range_end = 4000.0
+	add_child(gm)
+	var gb := _new_body(1)
+	var side := Vector3(-dir.z, 0, dir.x)
+	var cyl := CylinderShape3D.new()
+	cyl.radius = 6.0
+	cyl.height = 40.0
+	_shapes.append(cyl)
+	for sg in [-1.0, 1.0]:
+		PhysicsServer3D.body_add_shape(gb, cyl.get_rid(), Transform3D(Basis(), pos + side * sg * 47.0 * span + Vector3(0, 20, 0)))
+	var lbl := Label3D.new()
+	lbl.text = text
+	lbl.font_size = 512 if text.length() < 12 else 320
+	lbl.pixel_size = 0.03
+	lbl.outline_size = 48
+	lbl.modulate = Color("#ffd36e")
+	lbl.outline_modulate = Color("#3a1d10")
+	lbl.position = pos + Vector3(0, 58, 0)
+	lbl.rotation.y = yaw
+	lbl.visibility_range_end = 2500.0
+	add_child(lbl)
 
 ## Dentro de um túnel ou debaixo de um teto de pedra (eco no som, luz mais baixa).
 func in_cave(p: Vector3) -> bool:
@@ -461,14 +486,14 @@ func _place_checkpoints() -> void:
 	col_mat.albedo_color = Color(0.35, 0.95, 1.0, 0.35)
 	col_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	col_mat.disable_fog = true
-	for i in info.checkpoints.size():
-		var c: Dictionary = info.checkpoints[i]
+	for i in event.gates.size():
+		var c: Dictionary = event.gates[i]
 		var pos := Vector3(c.p[0], c.p[1], c.p[2])
 		var dir := Vector2(c.dir[0], c.dir[1])
 		var side := Vector3(-dir.y, 0, dir.x)
 		var node := Node3D.new()
 		add_child(node)
-		var w := float(c.w) * 0.6
+		var w := float(c.w) * 0.6 if float(c.w) >= 150.0 else float(c.w) - 20.0   # distância entre os dois pilares
 		for sg in [-1.0, 1.0]:
 			var mi := MeshInstance3D.new()
 			mi.mesh = pylon
@@ -519,10 +544,96 @@ func _place_checkpoints() -> void:
 
 ## Circuito: só o próximo portão tem a coluna de luz; os já passados desaparecem.
 ## Exploração (next_index < 0): todos os portões ficam, sem colunas.
-func highlight(next_index: int) -> void:
+func highlight(next_index: int, hide_passed := true) -> void:
 	for i in checkpoints.size():
 		checkpoints[i].column.visible = i == next_index
-		checkpoints[i].node.visible = next_index < 0 or i >= next_index
+		checkpoints[i].node.visible = next_index < 0 or i >= next_index or not hide_passed
+
+# ------------------------------------------------------------------ faixas de impulso (chevrons que brilham no chão)
+func _place_pads() -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var plate := Color("#1d2a3a")
+	st.set_color(plate)
+	for v in [Vector3(-7, 0.15, -9), Vector3(7, 0.15, -9), Vector3(7, 0.15, 9), Vector3(-7, 0.15, -9), Vector3(7, 0.15, 9), Vector3(-7, 0.15, 9)]:
+		st.add_vertex(v)
+	for k in 3:   # três chevrons a apontar para a frente (-Z)
+		var z0 := 5.0 - k * 6.0
+		st.set_color(Color("#7ff6ff") if k != 1 else Color("#ffd36e"))
+		for q in [[Vector3(-6, 0.3, z0), Vector3(0, 0.3, z0 - 4.5), Vector3(0, 0.3, z0 - 2.0)], [Vector3(-6, 0.3, z0), Vector3(0, 0.3, z0 - 2.0), Vector3(-6, 0.3, z0 + 2.5)],
+				[Vector3(6, 0.3, z0), Vector3(0, 0.3, z0 - 2.0), Vector3(0, 0.3, z0 - 4.5)], [Vector3(6, 0.3, z0), Vector3(6, 0.3, z0 + 2.5), Vector3(0, 0.3, z0 - 2.0)]]:
+			for v in q:
+				st.add_vertex(v)
+	st.generate_normals()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.emission_enabled = true
+	mat.emission = Color("#3fe6ff")
+	mat.emission_energy_multiplier = 0.8
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	st.set_material(mat)
+	var mesh := st.commit()
+	var xs: Array = []
+	for pd in info.get("pads", []):
+		var xf := Transform3D(Basis(Vector3.UP, float(pd[3])), Vector3(pd[0], float(pd[1]) + 0.1, pd[2]))
+		xs.append(xf)
+		var a := Area3D.new()
+		var cs := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(16.0, 8.0, 20.0)
+		cs.shape = box
+		a.add_child(cs)
+		a.transform = xf.translated_local(Vector3(0, 3, 0))
+		a.body_entered.connect(func(b):
+			if b == player:
+				pad_hit.emit())
+		add_child(a)
+	if not xs.is_empty():
+		_grouped(mesh, xs, CELL_GROUP, 1200.0)
+
+# ------------------------------------------------------------------ vegetação densa (ficheiro binário veg.zst)
+## 2 palavras de 32 bits por planta: x,z (meio metro) | y (1/64 m), tipo, rumo, escala.
+const VEG_VIS := {"pine": 1100.0, "tree_acacia": 1100.0, "tree_acacia_b": 1000.0, "tree_giant": 2600.0, "palm": 1000.0,
+	"cactus": 800.0, "bush": 420.0, "tree_mushroom": 1600.0, "dead_tree": 800.0, "fern": 320.0, "boulder_a": 700.0,
+	"crystals_cyan": 900.0, "crystals_mag": 900.0}
+const VEG_GROUP := 512.0
+func _place_veg() -> void:
+	var n := int(info.get("veg_count", 0))
+	if n == 0 or not FileAccess.file_exists("res://assets/map/veg.zst"):
+		return
+	var types: Array = info.veg_types
+	var raw := FileAccess.get_file_as_bytes("res://assets/map/veg.zst").decompress(n * 8, FileAccess.COMPRESSION_ZSTD)
+	var words := raw.to_int32_array()
+	var half := float(info.size) * 0.5
+	var groups := {}          # Vector3i(tipo, gx, gz) -> [Transform3D]
+	var bodies := {}          # Vector2i(gx, gz) -> RID (troncos)
+	var shapes := []
+	for ty in types:
+		_prop(String(ty))
+	for t in types.size():
+		shapes.append(props[types[t]].shape)
+	for i in n:
+		var w0: int = words[i * 2]
+		var w1: int = words[i * 2 + 1]
+		var x := float(w0 & 0xFFFF) * 0.5 - half
+		var z := float((w0 >> 16) & 0xFFFF) * 0.5 - half
+		var y := float(w1 & 0xFFFF) / 64.0 - 100.0
+		var t := (w1 >> 16) & 0xF
+		var yaw := float((w1 >> 20) & 0x3F) / 64.0 * TAU
+		var sc := 0.6 + float((w1 >> 26) & 0x3F) * 0.03
+		var gx := floori(x / VEG_GROUP)
+		var gz := floori(z / VEG_GROUP)
+		var xf := _xf(Vector3(x, y, z), yaw, sc)
+		groups.get_or_add(Vector3i(t, gx, gz), []).append(xf)
+		var shp: Shape3D = shapes[t]
+		if shp and props[types[t]].cyl and not (types[t] in RIDE_OVER):   # troncos são sólidos; arbustos, fetos e cristais não
+			var key := Vector2i(gx, gz)
+			if not bodies.has(key):
+				bodies[key] = _new_body(1)
+			PhysicsServer3D.body_add_shape(bodies[key], shp.get_rid(), xf * Transform3D(Basis(), Vector3(0, props[types[t]].h * 0.5, 0)))
+	for key in groups:
+		var name: String = types[key.x]
+		_multimesh(props[name].mesh, groups[key], null, VEG_VIS.get(name, 900.0), name != "fern" and name != "bush")
 
 # ------------------------------------------------------------------ balizas ao longo de cada caminho (cor = nível)
 func _place_route_posts() -> void:

@@ -41,6 +41,7 @@ var standings_label: RichTextLabel
 var remote_dots: Array = []   # [[Vector2 posição, Color, nome]] dos outros jogadores
 var zones: Array = []         # [{name, c}] para o mapa grande
 var gates: Array = []         # [Vector2] portões do circuito (mapa grande)
+var event_marks: Array = []   # [[Vector2, nome, Color]] largadas das outras corridas (explorar)
 var next_gate := 0
 var map_panel: Control
 var map_view: Control
@@ -305,10 +306,13 @@ static func fmt_time(t: float) -> String:
 		return "%d:%02d:%02d,%02d" % [h, m, s, c]
 	return "%02d:%02d,%02d" % [m, s, c]
 
-func set_race(time: float, best: float, cp: int, cp_total: int, kmh: float) -> void:
+func set_race(time: float, best: float, cp: int, cp_total: int, kmh: float, label := "") -> void:
 	time_label.text = fmt_time(time) if time > 0.0 else "00:00,00"
 	best_label.text = "RECORDE  " + fmt_time(best)
-	cp_label.text = "PORTÃO %d/%d" % [mini(cp + 1, cp_total), cp_total] if cp < cp_total else "RUMO À META!"
+	if label != "":
+		cp_label.text = label
+	else:
+		cp_label.text = "PORTÃO %d/%d" % [mini(cp + 1, cp_total), cp_total] if cp < cp_total else "RUMO À META!"
 	speed_label.text = "%d km/h" % int(kmh)
 	next_gate = cp
 
@@ -435,6 +439,13 @@ func _draw_big_map() -> void:
 		for i in gates.size():
 			if i >= next_gate:
 				map_view.draw_circle(_world_to_big(gates[i]), 7.0 if i == next_gate else 4.0, Color("#7ff6ff") if i == next_gate else Color(1, 1, 1, 0.8))
+	for m in event_marks:
+		var q := _world_to_big(m[0])
+		map_view.draw_circle(q, 9.0, m[2])
+		map_view.draw_arc(q, 9.0, 0.0, TAU, 16, Color(0.1, 0.05, 0.02, 0.9), 2.5)
+		var mw := font_body.get_string_size(m[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		map_view.draw_string_outline(font_body, q + Vector2(-mw * 0.5, 26), m[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, Color(0.1, 0.05, 0.02, 0.9))
+		map_view.draw_string(font_body, q + Vector2(-mw * 0.5, 26), m[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, m[2].lightened(0.4))
 	for d in remote_dots:
 		var q := _world_to_big(d[0])
 		map_view.draw_circle(q, 9.0, d[1])

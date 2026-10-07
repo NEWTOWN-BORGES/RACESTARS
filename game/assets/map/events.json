@@ -1,0 +1,30 @@
+[
+ {
+  "id": "grande",
+  "name": "Grande Corrida",
+  "type": "sprint",
+  "laps": 1,
+  "length": 115537
+ },
+ {
+  "id": "floresta",
+  "name": "Circuito da Floresta",
+  "type": "circuit",
+  "laps": 3,
+  "length": 9688
+ },
+ {
+  "id": "monumentos",
+  "name": "Circuito dos Monumentos",
+  "type": "circuit",
+  "laps": 3,
+  "length": 7863
+ },
+ {
+  "id": "drag",
+  "name": "Reta do Sal",
+  "type": "drag",
+  "laps": 1,
+  "length": 3000
+ }
+]

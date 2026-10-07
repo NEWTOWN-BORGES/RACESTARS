@@ -65,6 +65,7 @@ PAL = {
     'bone': {'c': '#efe5cc'}, 'bone_dark': {'c': '#c9b994'}, 'bone_socket': {'c': '#3a2c22'},
     'hull': {'c': '#9ba2aa'}, 'hull_dark': {'c': '#5d646e'}, 'hull_light': {'c': '#c8cdd2'}, 'hull_rust': {'c': '#8c5c46'},
     'ship_light': {'c': '#ffe2a8', 'e': '#ffb55a', 's': 2.5},
+    'gold': {'c': '#f2c25a', 'e': '#ffb02e', 's': 1.6}, 'rune': {'c': '#9ffcff', 'e': '#3fe6ff', 's': 2.4},
     # veículo
     'v_white': {'c': '#f4eee2', 'r': 0.5}, 'v_red': {'c': '#e5483a', 'r': 0.5}, 'v_navy': {'c': '#272b47', 'r': 0.6},
     'v_glass': {'c': '#1d4558', 'r': 0.1}, 'v_helmet': {'c': '#ff9d2e', 'r': 0.4},
@@ -708,11 +709,11 @@ def make_faisca(name):
 
 
 # ------------------------------------------------------------------ peças do mapa grande (túneis, pontes, aqueduto, ruínas)
-def make_tunnel(name, L, tops, step=24.0, W=84.0):
+def make_tunnel(name, L, tops, step=24.0, W=84.0, THW=18.0):
     """Bloco de túnel: a tampa segue o perfil 'tops' (alturas acima do chão do túnel, de step em step metros),
     por cima passa-se de carro; túnel de 36 m de largura por baixo. Chão aberto em z=0, ao longo de +Y."""
     m = Mesh(name)
-    THW, TWALL, TARCH = 18.0, 11.0, 7.0
+    TWALL, TARCH = (11.0, 7.0) if THW <= 20 else (15.0, 14.0)   # túnel largo: boca mais alta
     BOT = -3.0
     def prof(y):
         f = min(max(y / step, 0.0), len(tops) - 1.0001); i = int(f); t = f - i
@@ -733,7 +734,8 @@ def make_tunnel(name, L, tops, step=24.0, W=84.0):
             x = sx * W / 2
             m.face('rock_dark', [(x, y0, BOT), (x, y1, BOT), (x, y1, top(x, y1)), (x, y0, top(x, y0))], want=(sx, 0, 0))
     ts = [0, 0.25, 0.5, 0.75, 1.0]
-    cols_in = [-THW + i * 3.0 for i in range(13)]
+    n_in = max(12, int(round(2 * THW / 3.0)))
+    cols_in = [-THW + i * 2 * THW / n_in for i in range(n_in + 1)]
     for yf, sg in ((0.0, -1), (L, 1)):
         cols_l = [-W / 2 + (W / 2 - THW) * i / 3 for i in range(4)]
         cols_r = [THW + (W / 2 - THW) * i / 3 for i in range(4)]
@@ -1208,6 +1210,34 @@ def make_crashed_ship(name, seed=91):
               rnd.uniform(20, 60), rnd.uniform(8, 20), rnd.uniform(6, 30), RX(rnd.uniform(-40, 40)) @ RZ(rnd.uniform(0, 180)))
     return m.done()
 
+def make_pyramid(name):
+    """Pirâmide em degraus (~250 m de base, ~140 m de altura), escadaria num dos lados e topo dourado."""
+    m = Mesh(name)
+    steps, base, H = 9, 250.0, 140.0
+    z = 0.0
+    for k in range(steps):
+        w = base * (1 - k / (steps + 1.5)); h = H / steps
+        m.box('sand_light' if k % 2 == 0 else 'sand', 0, 0, z + h / 2, w, w, h)
+        m.box('orange_band', 0, 0, z + h - 0.6, w + 0.6, w + 0.6, 1.2)
+        z += h
+    m.box('stone_dark', 0, base * 0.3, H * 0.45, 34, base * 0.62, 6, RX(-math.degrees(math.atan2(H, base * 0.5))))   # escadaria
+    m.box('cream', 0, 0, H + 9, 30, 30, 18)
+    m.cone('gold', 15, 0.5, 26, T(0, 0, H + 31), segs=4)
+    for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        m.box('rune', sx * 15.5, sy * 15.5, H + 9, 1.2, 1.2, 16)
+    return m.done()
+
+def make_obelisk(name):
+    """Obelisco gigante (~110 m) com faixas de runas que brilham e ponta dourada."""
+    m = Mesh(name)
+    m.box('stone_dark', 0, 0, 4, 22, 22, 8)
+    m.box('stone', 0, 0, 10, 17, 17, 4)
+    shaft = m.cone('stone_light', 7.5, 4.8, 92, T(0, 0, 58) @ RZ(45), segs=4)
+    for z in (30, 55, 80):
+        m.cone('rune', 7.6 - (z - 12) / 92 * 2.7 + 0.15, 7.6 - (z - 12) / 92 * 2.7 + 0.1, 1.6, T(0, 0, z) @ RZ(45), segs=4, caps=False)
+    m.cone('gold', 4.9, 0.2, 12, T(0, 0, 110) @ RZ(45), segs=4)
+    return m.done()
+
 # ------------------------------------------------------------------ montagem
 def build_all():
     global COLL
@@ -1253,12 +1283,14 @@ def build_all():
     B.append(make_colossal_statue('colosso_estatua'))
     B.append(make_ribcage('colosso_costelas'))
     B.append(make_crashed_ship('colosso_nave'))
+    B.append(make_pyramid('piramide'))
+    B.append(make_obelisk('obelisco'))
     mj = os.path.normpath(os.path.join(HERE, '..', 'game', 'assets', 'map', 'map.json'))
     if os.path.exists(mj):  # túneis e pontes feitos à medida do mapa
         import json
         info = json.load(open(mj))
         for t in info['tunnels']:
-            B.append(make_tunnel(t['name'], t['len'], t['tops'], t.get('step', 24.0)))
+            B.append(make_tunnel(t['name'], t['len'], t['tops'], t.get('step', 24.0), t.get('w', 84.0), t.get('thw', 18.0)))
         for k, b in enumerate(info['bridges']):
             B.append(make_bridge(b['name'], b['len'], b['width'], b['broken'], seed=k + 3, deep=b.get('deep', 46.0)))
     B.append(make_canyon_roof('canyon_roof'))
