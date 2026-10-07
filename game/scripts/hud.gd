@@ -86,7 +86,6 @@ func _ready() -> void:
 	minimap = Control.new()
 	minimap.position = Vector2(22, 72)
 	minimap.size = Vector2(220, 220)
-	minimap.clip_contents = true
 	minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	minimap.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	minimap.draw.connect(_draw_minimap)
@@ -364,38 +363,60 @@ func _draw_arrow() -> void:
 	arrow.draw_colored_polygon(pts, Color("#7ff6ff"))
 	arrow.draw_polyline(pts + PackedVector2Array([pts[0]]), Color("#0b2a33"), 4.0)
 
-func _player_marker(ci: CanvasItem, pp: Vector2, sz: float) -> void:
-	var fwd := Vector2(-sin(player_heading), -cos(player_heading))
+func _player_marker(ci: CanvasItem, pp: Vector2, sz: float, heading := INF) -> void:
+	var h := player_heading if heading == INF else heading
+	var fwd := Vector2(-sin(h), -cos(h))
 	var side := Vector2(-fwd.y, fwd.x)
 	var tri := PackedVector2Array([pp + fwd * sz * 1.6, pp - fwd * sz + side * sz, pp - fwd * sz - side * sz])
 	ci.draw_colored_polygon(tri, Color("#ff4f4f"))
 	ci.draw_polyline(tri + PackedVector2Array([tri[0]]), Color.WHITE, 2.0)
 
-## Minimapa: janela de MINI_SPAN metros à volta do veículo (norte para cima).
+## Minimapa redondo que roda com o veículo (a frente fica sempre para cima, como nos jogos de corrida),
+## com um "N" na borda a apontar para o norte. Mostra MINI_SPAN metros de diâmetro.
 func _draw_minimap() -> void:
-	var r := Rect2(Vector2.ZERO, minimap.size)
-	minimap.draw_rect(r, Color(0.1, 0.06, 0.04, 0.6))
-	var tex_size := minimap_tex.get_size()
-	var px_per_m := tex_size.x / map_size
-	var center_px := (player_pos / map_size + Vector2(0.5, 0.5)) * tex_size
-	var span_px := MINI_SPAN * px_per_m
-	var src := Rect2(center_px - Vector2(span_px, span_px) * 0.5, Vector2(span_px, span_px))
-	minimap.draw_texture_rect_region(minimap_tex, r, src, Color(1, 1, 1, 0.92))
-	var scale := minimap.size.x / MINI_SPAN
 	var mid := minimap.size * 0.5
-	var to_mini := func(w: Vector2) -> Vector2: return mid + (w - player_pos) * scale
+	var rad := minimap.size.x * 0.5
+	var scale := minimap.size.x / MINI_SPAN
+	var f := Vector2(-sin(player_heading), -cos(player_heading))   # frente (no plano x/z)
+	var r := Vector2(cos(player_heading), -sin(player_heading))    # direita
+	var to_mini := func(w: Vector2) -> Vector2:
+		var d := w - player_pos
+		return mid + Vector2(d.dot(r), -d.dot(f)) * scale
+	# disco do mapa: polígono redondo com as coordenadas de textura rodadas
+	var pts := PackedVector2Array()
+	var uvs := PackedVector2Array()
+	var cols := PackedColorArray()
+	for k in 48:
+		var a := TAU * k / 48.0
+		var o := Vector2(cos(a), sin(a)) * rad
+		pts.append(mid + o)
+		var w := player_pos + (r * o.x - f * o.y) / scale
+		uvs.append(w / map_size + Vector2(0.5, 0.5))
+		cols.append(Color(1, 1, 1, 0.92))
+	minimap.draw_circle(mid, rad + 4.0, Color(0.1, 0.06, 0.04, 0.6))
+	minimap.draw_polygon(pts, cols, uvs, minimap_tex)
+	var keep_in := func(q: Vector2, margin: float) -> Vector2:
+		var v := q - mid
+		return mid + v.limit_length(rad - margin)
 	if has_target:
 		var q: Vector2 = to_mini.call(next_cp)
-		var clamped := Vector2(clampf(q.x, 8, minimap.size.x - 8), clampf(q.y, 8, minimap.size.y - 8))
-		minimap.draw_circle(clamped, 7.0 if clamped == q else 5.0, Color("#7ff6ff"))
-		minimap.draw_arc(clamped, 7.0, 0.0, TAU, 16, Color("#0b2a33"), 2.0)
+		var qc: Vector2 = keep_in.call(q, 8.0)
+		minimap.draw_circle(qc, 7.0 if qc.is_equal_approx(q) else 5.5, Color("#7ff6ff"))
+		minimap.draw_arc(qc, 7.0, 0.0, TAU, 16, Color("#0b2a33"), 2.0)
 	for d in remote_dots:
-		var q: Vector2 = to_mini.call(d[0])
-		q = Vector2(clampf(q.x, 6, minimap.size.x - 6), clampf(q.y, 6, minimap.size.y - 6))
+		var q: Vector2 = keep_in.call(to_mini.call(d[0]), 6.0)
 		minimap.draw_circle(q, 6.0, d[1])
 		minimap.draw_arc(q, 6.0, 0.0, TAU, 16, Color.WHITE, 1.5)
-	_player_marker(minimap, mid, 7.0)
-	minimap.draw_rect(r, Color(1, 0.85, 0.55, 0.7), false, 3.0)
+	_player_marker(minimap, mid, 7.0, 0.0)
+	minimap.draw_arc(mid, rad, 0.0, TAU, 64, Color(1, 0.85, 0.55, 0.8), 3.0, true)
+	# norte
+	var n := Vector2(Vector2(0, -1).dot(r), -Vector2(0, -1).dot(f))
+	var np := mid + n * (rad - 2.0)
+	minimap.draw_circle(np, 12.0, Color("#2a1a10"))
+	minimap.draw_arc(np, 12.0, 0.0, TAU, 20, Color(1, 0.85, 0.55, 0.9), 2.0, true)
+	var fs := 16
+	var tw := font_title.get_string_size("N", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	minimap.draw_string(font_title, np + Vector2(-tw * 0.5, fs * 0.36), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#ffd36e"))
 
 func _world_to_big(w: Vector2) -> Vector2:
 	return (w / map_size + Vector2(0.5, 0.5)) * map_view.size

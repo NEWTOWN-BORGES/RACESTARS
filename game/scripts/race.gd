@@ -7,7 +7,7 @@ extends Node3D
 ##
 ## Argumentos de teste (depois de `--`):
 ##   --mode=explorar|corrida  --autoplay  --variant=N|sorte  --log  --shots=2,6  --shotdir=/caminho
-##   --quit=SEG  --cp=N (começa no portão N)  --at=x,z,dx,dz[,y]  --fpv  --nohud  --travel=x,z
+##   --quit=SEG  --cp=N (começa no portão N)  --at=x,z,dx,dz[,y]  --fpv  --nohud  --travel=x,z  --openmap=SEG
 
 enum State { WAIT, COUNTDOWN, RACE, FINISHED, FREE }
 
@@ -106,6 +106,9 @@ func _ready() -> void:
 			r.rotation.y = atan2(-start_dir.x, -start_dir.y)
 			remotes[id] = r
 		Net.peer_state.connect(_on_peer_state)
+		Net.players_changed.connect(_on_players_changed)
+		for id in Net.players:
+			_left_name[id] = String(Net.players[id].name)
 		Net.peer_finished.connect(_on_peer_finished)
 		Net.countdown_started.connect(func():
 			if not explore:
@@ -158,6 +161,10 @@ func _ready() -> void:
 	if args.has("shots"):
 		for s in String(args["shots"]).split(","):
 			shots.append(float(s))
+	var hooks := TestHooks.new()
+	hooks.race = self
+	hooks.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(hooks)
 
 ## Rota do piloto automático (testes): escolhe um caminho por trecho com --variant=N ou --variant=sorte.
 func _build_route() -> Array:
@@ -248,20 +255,34 @@ func _process(dt: float) -> void:
 	audio.update(player.running, player.speed_fraction(), cave, dt, player.drifting)
 	if mp:
 		_mp_update(dt)
-	if not shots.is_empty() and elapsed >= shots[0]:
-		var t: float = shots.pop_front()
-		var dir: String = args.get("shotdir", OS.get_user_data_dir())
-		DirAccess.make_dir_recursive_absolute(dir)
-		var path := "%s/shot_%05.1f.png" % [dir, t]
-		get_viewport().get_texture().get_image().save_png(path)
-		print("PRINT ", path, "  portão=", next_cp, "  t=", snappedf(t_race, 0.1), "  fps=", Engine.get_frames_per_second())
 	if args.has("log") and mp and int(elapsed) != int(elapsed - dt):
 		for id in remotes:
-			print("   adversário %s: progresso %.2f  pos=%s" % [Net.players[id].name, remotes[id].progress, remotes[id].global_position.round()])
+			print("   adversário %s: progresso %.2f  pos=%s" % [_pname(id), remotes[id].progress, remotes[id].global_position.round()])
 	if args.has("log") and int(elapsed * 2.0) != int((elapsed - dt) * 2.0):
 		print("t=%.1f  pos=(%d,%d,%d)  v=%d km/h  chão=%s  portão=%d  estado=%d%s" % [t_race, p.x, p.y, p.z, player.speed() * 3.6,
 			player.on_ground, next_cp, state, ("  deriva" if player.drifting else "")])
-	if args.has("quit") and elapsed >= float(args["quit"]):
+
+## Testes: fotografias, abrir o mapa e sair (corre mesmo com o jogo em pausa).
+class TestHooks extends Node:
+	var race: Node
+	var t := 0.0
+	func _process(dt: float) -> void:
+		t += dt
+		race._test_hooks(t)
+
+var _map_opened := false
+func _test_hooks(t: float) -> void:
+	if args.has("openmap") and not _map_opened and t >= float(args["openmap"]):
+		_map_opened = true
+		hud.open_map()
+	if not shots.is_empty() and t >= shots[0]:
+		var st: float = shots.pop_front()
+		var dir: String = args.get("shotdir", OS.get_user_data_dir())
+		DirAccess.make_dir_recursive_absolute(dir)
+		var path := "%s/shot_%05.1f.png" % [dir, st]
+		get_viewport().get_texture().get_image().save_png(path)
+		print("PRINT ", path, "  portão=", next_cp, "  t=", snappedf(t_race, 0.1), "  fps=", Engine.get_frames_per_second())
+	if args.has("quit") and t >= float(args["quit"]):
 		print("FIM  portão=", next_cp, "/", info.checkpoints.size(), "  t=", snappedf(t_race, 0.1), "  estado=", state)
 		get_tree().quit()
 
@@ -337,7 +358,7 @@ func _mp_update(dt: float) -> void:
 	var dots := []
 	for id in remotes:
 		var rp: Vector3 = remotes[id].global_position
-		dots.append([Vector2(rp.x, rp.z), Net.color_of(id), String(Net.players.get(id, {"name": "?"}).name)])
+		dots.append([Vector2(rp.x, rp.z), Net.color_of(id), _pname(id)])
 	hud.remote_dots = dots
 	var table := []
 	for r in rows:
@@ -345,13 +366,30 @@ func _mp_update(dt: float) -> void:
 		table.append([pd.name, Net.color_of(r[0]), r[0] == Net.my_id(), r[2]])
 	hud.set_standings(table)
 
+func _pname(id: int) -> String:
+	return String(Net.players.get(id, {}).get("name", "?"))
+
+## Alguém saiu do jogo: o veículo dele desaparece.
+func _on_players_changed() -> void:
+	for id in remotes.keys():
+		if not Net.players.has(id):
+			remotes[id].queue_free()
+			remotes.erase(id)
+			hud.set_center("", "%s saiu do jogo" % _left_name.get(id, "Um jogador"))
+			get_tree().create_timer(2.5).timeout.connect(func():
+				if state != State.FINISHED:
+					hud.set_center(""))
+	for id in Net.players:
+		_left_name[id] = String(Net.players[id].name)
+
+var _left_name := {}
 var _seen_peers := {}
 func _on_peer_state(id: int, s: PackedFloat32Array) -> void:
 	if remotes.has(id):
 		remotes[id].push_state(s)
 		if args.has("log") and not _seen_peers.has(id):
 			_seen_peers[id] = true
-			print("PvP: a receber o veículo de ", Net.players[id].name, " em ", Vector3(s[0], s[1], s[2]))
+			print("PvP: a receber o veículo de ", _pname(id), " em ", Vector3(s[0], s[1], s[2]))
 
 func _on_peer_finished(id: int, time: float) -> void:
 	results[id] = time

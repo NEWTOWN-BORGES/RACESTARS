@@ -17,6 +17,7 @@ var start_btn: Button
 var explore_btn: Button
 var hosts_box: VBoxContainer
 var status_lbl: Label
+var loading_lbl: Label
 var args := {}
 
 func _ready() -> void:
@@ -32,6 +33,7 @@ func _ready() -> void:
 	Net.hosts_changed.connect(_refresh_hosts)
 	Net.status_changed.connect(func(t): status_lbl.text = t)
 	Net.everyone_back_to_menu.connect(func(): _show(main_box))
+	Net.loading.connect(_show_loading)
 	if args.has("mode"):
 		Net.mode = String(args["mode"])
 	if Net.online:      # voltou de uma corrida PvP: fica na sala de espera
@@ -45,6 +47,10 @@ func _ready() -> void:
 		Net.my_name = String(args.get("name", "Convidado"))
 		_show(join_box)
 		Net.join_game(String(args["join"]))
+	elif args.has("menushot"):   # teste: fotografa o menu e sai
+		get_tree().create_timer(1.5).timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png(String(args["menushot"]))
+			get_tree().quit())
 	elif not args.is_empty():
 		get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
 
@@ -72,7 +78,7 @@ func _button(text: String, cb: Callable, accent := Color("#ffb347")) -> Button:
 	b.text = text
 	b.add_theme_font_override("font", font_title)
 	b.add_theme_font_size_override("font_size", 34)
-	b.custom_minimum_size = Vector2(520, 84)
+	b.custom_minimum_size = Vector2(520, 76)
 	for st in ["normal", "hover", "pressed", "focus"]:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.12, 0.07, 0.04, 0.78) if st != "pressed" else Color(accent, 0.55)
@@ -92,7 +98,7 @@ func _edit(placeholder: String, text: String) -> LineEdit:
 	e.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	e.add_theme_font_override("font", font_body)
 	e.add_theme_font_size_override("font_size", 32)
-	e.custom_minimum_size = Vector2(520, 70)
+	e.custom_minimum_size = Vector2(520, 64)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(1, 1, 1, 0.9)
 	sb.set_corner_radius_all(16)
@@ -108,6 +114,8 @@ func _box() -> VBoxContainer:
 	v.set_anchors_preset(Control.PRESET_CENTER)
 	v.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	v.grow_vertical = Control.GROW_DIRECTION_BOTH
+	v.offset_top += 70     # abaixo do título
+	v.offset_bottom += 70
 	add_child(v)
 	return v
 
@@ -167,7 +175,19 @@ func _build() -> void:
 	join_box.add_child(ip_edit)
 	join_box.add_child(_button("ENTRAR", func(): _join(ip_edit.text.strip_edges()), Color("#5fe06a")))
 	join_box.add_child(_button("VOLTAR", _on_leave, Color("#ff6a5a")))
+	loading_lbl = _label("A CARREGAR O MUNDO...", 64, font_title)
+	loading_lbl.add_theme_color_override("font_color", Color("#ffd36e"))
+	loading_lbl.set_anchors_preset(Control.PRESET_CENTER)
+	loading_lbl.position = Vector2(-600, -60)
+	loading_lbl.size = Vector2(1200, 120)
+	loading_lbl.visible = false
+	add_child(loading_lbl)
 	_show(main_box)
+
+func _show_loading() -> void:
+	_show(null)
+	status_lbl.text = ""
+	loading_lbl.visible = true
 
 func _show(box: Control) -> void:
 	for b in [main_box, lobby_box, join_box]:
@@ -177,6 +197,9 @@ func _show(box: Control) -> void:
 func _on_solo(m: String) -> void:
 	Net.leave()
 	Net.mode = m
+	_show_loading()
+	await get_tree().process_frame
+	await get_tree().process_frame
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 func _on_host() -> void:

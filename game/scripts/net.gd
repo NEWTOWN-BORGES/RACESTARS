@@ -11,6 +11,7 @@ signal countdown_started
 signal peer_state(id: int, state: PackedFloat32Array)
 signal peer_finished(id: int, time: float)
 signal everyone_back_to_menu
+signal loading                    # vai mudar para o jogo (o menu mostra "a carregar")
 
 const PORT := 47777
 const DISC_PORT := 47778
@@ -193,6 +194,9 @@ func start_race(m: String = "") -> void:
 func _go_race(m: String) -> void:
 	mode = m
 	get_tree().paused = false
+	loading.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 ## Cada um avisa quando a corrida carregou; o anfitrião começa a contagem quando todos estão prontos.

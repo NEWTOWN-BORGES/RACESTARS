@@ -520,7 +520,7 @@ def sec_G(s):
 def sec_H(s):
     TOP = 64.0
     stamp_rect(s, 0.08, 0.91, -330, 330, TOP, corner=120, edge=9, wobble=60)
-    slot = Path(s, 'fenda vermelha', 0, [(0, 0), (0.08, 0), (0.2, 140), (0.34, -120), (0.48, 110), (0.62, -100), (0.76, 60), (0.86, 0), (1, 0)], 22,
+    slot = Path(s, 'fenda vermelha', 0, [(0, 0), (0.08, 0), (0.2, 115), (0.34, -100), (0.48, 90), (0.62, -85), (0.76, 50), (0.86, 0), (1, 0)], 28,
                 hfun=lambda u: np.full_like(u, GROUND))
     rim = Path(s, 'por cima da fenda', 2, [(0, 0), (0.04, -80), (0.12, -160), (0.2, -70), (0.3, 0), (0.6, 0), (0.74, -70), (0.84, -130), (0.9, -125), (0.95, -60), (1, 0)], 28,
                hfun=lambda u: np.where(u < 0.902, GROUND + (TOP - GROUND) * smooth(0.0, 0.18, u), GROUND + 1))
@@ -528,7 +528,7 @@ def sec_H(s):
     for k in crossings(rim, slot):
         if 0.02 < rim.u[k] < 0.85:
             a = max(cross_angle(rim, k, slot), 0.35)
-            rim.kicker(float(rim.S[k]) - (22 + 6) / math.sin(a) - 3, rise=2.5, run=36)
+            rim.kicker(float(rim.S[k]) - (28 + 6) / math.sin(a) - 3, rise=2.5, run=36)
     carve(rim, 30)
     carve(slot, 6, 'set')
     ir = int(np.argmin(np.abs(slot.u - 0.55)))
@@ -627,19 +627,20 @@ def sec_L(s):
 def sec_R(s):
     road = Path(s, 'avenida dos arcos', 1, [(0, 0), (0.15, 120), (0.35, 40), (0.5, 140), (0.65, 40), (0.85, 120), (1, 0)], ROAD_HW, ground=True)
     arches_over(s, road, (0.15, 0.3, 0.45, 0.6, 0.75, 0.88), sc=1.6)
-    mesas = [(0.24, 44.0), (0.42, 52.0), (0.6, 48.0), (0.78, 40.0)]
+    MH = 0.072       # meia-largura de cada mesa (em u); falhas de ~0.025 (~90 m) para saltar
+    mesas = [(0.257, 52.0), (0.426, 48.0), (0.595, 44.0), (0.764, 40.0)]
     for uc, hh in mesas:
-        stamp_rect(s, uc - 0.055, uc + 0.055, -460, -240, hh, corner=60, edge=8, wobble=20, flat=True)
+        stamp_rect(s, uc - MH, uc + MH, -460, -240, hh, corner=60, edge=8, wobble=12, flat=True)
     def mh(u):
         h = GROUND + (mesas[0][1] - GROUND) * smooth(0.06, 0.17, u)
         for k, (uc, hh) in enumerate(mesas):
-            on = (u > uc - 0.055) & (u < uc + 0.055)
+            on = (u > uc - MH) & (u < uc + MH)
             h = np.where(on, hh, h)
-        h = np.where((u > mesas[0][0] + 0.055) & ~np.any([(u > uc - 0.055) & (u < uc + 0.055) for uc, _ in mesas], axis=0), GROUND, h)
-        return np.where(u > 0.835, GROUND, h)
+        h = np.where((u > mesas[0][0] + MH) & ~np.any([(u > uc - MH) & (u < uc + MH) for uc, _ in mesas], axis=0), GROUND, h)
+        return np.where(u > mesas[-1][0] + MH, GROUND, h)
     hop = Path(s, 'de mesa em mesa', 2, [(0, 0), (0.06, -110), (0.13, -280), (0.2, -350), (0.8, -350), (0.87, -280), (0.94, -110), (1, 0)], 24, hfun=mh)
     for uc, hh in mesas:
-        hop.kicker(hop.s_at_u(uc + 0.05), rise=2.5, run=30, terrain=False)
+        hop.kicker(hop.s_at_u(uc + MH - 0.004), rise=2.5, run=30, terrain=False)
     carve(hop, 6, hw=26, mode='fill')
     us = np.linspace(0, 1, 40)
     wash = Path(s, 'leito seco', 0, [(float(u), float(330 + 110 * math.sin(u * 9.0) * smooth(0.05, 0.15, u) * (1 - smooth(0.85, 0.95, u))) * (smooth(0.0, 0.12, u) * (1 - smooth(0.88, 1.0, u)))) for u in us],
@@ -1380,8 +1381,14 @@ print('  problemas nos caminhos:', problems)
 print('a gravar...')
 os.makedirs(OUT, exist_ok=True)
 zc = zstandard.ZstdCompressor(level=19, threads=-1)
-# alturas em passos de 12,5 cm (H/CELL em 1/64): comprime 2,4x melhor, erro máx. 6 cm
-open(os.path.join(OUT, 'height.zst'), 'wb').write(zc.compress((np.round(H / CELL * 64.0) / 64.0).astype(np.float16).tobytes()))
+# alturas em passos de 12,5 cm perto dos caminhos e 50 cm longe deles (serras): comprime muito melhor
+# e o erro (máx. 6 cm nas estradas, 25 cm nas serras) não se vê
+occ_q = np.zeros((NM, NM), bool)
+occ_q[np.clip(np.round((pts_all[:, 1] + HALF) / MR).astype(int), 0, NM - 1), np.clip(np.round((pts_all[:, 0] + HALF) / MR).astype(int), 0, NM - 1)] = True
+near_q = zoom((distance_transform_edt(~occ_q) * MR < 450.0).astype(np.float32), RES / NM, order=1) > 0.5
+qstep = np.where(near_q, 1.0 / 64.0, 1.0 / 16.0).astype(np.float32)
+open(os.path.join(OUT, 'height.zst'), 'wb').write(zc.compress((np.round(H / CELL / qstep) * qstep).astype(np.float16).tobytes()))
+del occ_q, near_q, qstep
 open(os.path.join(OUT, 'biome.zst'), 'wb').write(zc.compress(biome8.tobytes()))
 CH = 128
 nch = (RES - 1) // CH

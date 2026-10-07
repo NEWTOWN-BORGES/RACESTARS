@@ -42,6 +42,7 @@ var player: Node3D
 var cave_boxes: Array = []       # [{origin, fwd, len, half_w, top}] túneis e tetos (para o som e a luz)
 var spawn_points: Array = []     # [[Vector3, Vector2 direção]] pontos dos caminhos (renascer / viajar no mapa)
 var _bodies: Array = []          # RIDs no servidor de física
+var _shapes: Array = []          # formas criadas aqui: guardar a referência (senão são libertadas e a colisão desaparece)
 var _warm: Node3D
 var _warm_frames := 0
 var _space: RID
@@ -196,6 +197,7 @@ func _place_static(name: String, xf: Transform3D, mat: Material, double_shadow :
 	mi.visibility_range_end = 5200.0
 	add_child(mi)
 	var shape: Shape3D = P.shape if P.shape else P.mesh.create_trimesh_shape()
+	_shapes.append(shape)
 	PhysicsServer3D.body_add_shape(_new_body(1), shape.get_rid(), xf)
 	return mi
 
@@ -247,7 +249,7 @@ func _place_set_pieces() -> void:
 		var cyl := CylinderShape3D.new()
 		cyl.radius = 6.0
 		cyl.height = 40.0
-		props["_gate_leg"] = {"shape": cyl}
+		_shapes.append(cyl)
 		for sg in [-1.0, 1.0]:
 			PhysicsServer3D.body_add_shape(gb, cyl.get_rid(), Transform3D(Basis(), pos + side * sg * 47.0 + Vector3(0, 20, 0)))
 		var lbl := Label3D.new()
