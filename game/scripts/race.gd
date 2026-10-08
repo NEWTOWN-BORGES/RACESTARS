@@ -30,8 +30,11 @@ var elapsed := 0.0
 var args := {}
 var shots: Array = []
 var _last_count := 4
-var fx: Node
-var audio: Node
+const FXState = preload("res://scripts/speed_fx_state.gd")
+var fx_state := FXState.new()
+var environment_system: Node3D
+@onready var fx = $SpeedFX
+@onready var audio = $Audio
 var _fps_acc := 0.0
 var _fps_n := 0
 var _quality := 2
@@ -51,12 +54,14 @@ var cps: Array = []                # portões pela ordem em que se passam (nos c
 @onready var terrain = $Terrain
 @onready var map = $Map
 @onready var player = $Player
-@onready var cam = $Camera
+@onready var camera_rig = $CameraRig
+@onready var cam: Camera3D = $CameraRig/FollowPivot/RotationPivot/SpringArm3D/Camera3D
 @onready var hud = $HUD
 @onready var sun: DirectionalLight3D = $Sun
 @onready var env: Environment = $WorldEnvironment.environment
 
 func _ready() -> void:
+	process_physics_priority = 10
 	DisplayServer.screen_set_keep_on(true)
 	_setup_input()
 	args = _parse_args()
@@ -85,7 +90,7 @@ func _ready() -> void:
 	hud.map_size = float(info.size)
 	hud.player = player
 	hud.multiplayer_mode = mp
-	hud.camera_pressed.connect(func(): cam.toggle())
+	hud.camera_pressed.connect(func(): camera_rig.toggle())
 	hud.pause_action.connect(_on_pause_action)
 	hud.travel_requested.connect(_travel)
 	hud.set_mode(explore)
@@ -144,14 +149,15 @@ func _ready() -> void:
 		ap.y = terrain.height_at(ap.x, ap.z) if a.size() < 5 else float(a[4])
 		player.place(ap, Vector2(float(a[2]), float(a[3])).normalized(), 0.0)
 	terrain.update_now()
-	cam.player = player
-	cam.first_person = args.has("fpv")
-	cam.snap()
-	fx = preload("res://scripts/speed_fx.gd").new()
-	add_child(fx)
+	camera_rig.first_person = args.has("fpv")
+	camera_rig.setup(player)
 	fx.setup(player, cam)
-	audio = preload("res://scripts/audio.gd").new()
-	add_child(audio)
+	environment_system = preload("res://scripts/environment_controller.gd").new()
+	environment_system.name = "EnvironmentSystem"
+	add_child(environment_system)
+	var visual_quality := String(args.get("quality", preload("res://scripts/visual_quality.gd").selected()))
+	environment_system.setup($WorldEnvironment, sun, player, map, fx, visual_quality)
+	env = $WorldEnvironment.environment
 	best = _load_best()
 	map.highlight(-1 if explore else (int(cps[next_cp].phys) if next_cp < cps.size() else -2), ev.type != "circuit")
 	map.warmup(cam)
@@ -237,6 +243,10 @@ func _parse_args() -> Dictionary:
 			out[s] = true
 	return out
 
+func _physics_process(dt: float) -> void:
+	fx_state.capture(player, map.in_cave(player.global_position))
+	camera_rig.update_state(fx_state, dt)
+
 func _process(dt: float) -> void:
 	elapsed += dt
 	var p: Vector3 = player.global_position
@@ -278,14 +288,15 @@ func _process(dt: float) -> void:
 	hud.set_race(t_race, best, next_cp, cps.size(), player.speed() * 3.6, _race_label())
 	var cave: bool = map.in_cave(p)
 	# dentro da gruta / sob o teto de pedra a luz ambiente cai (fica mais escuro)
-	env.ambient_light_energy = move_toward(env.ambient_light_energy, 0.24 if cave else 0.52, dt * 1.2)
-	fx.update(player.running, player.speed(), player.speed_fraction(), cave, player.on_ground)
+	environment_system.update_environment(cave, dt)
+	fx_state.capture(player, cave)
+	fx.update_state(fx_state, dt)
 	if int(elapsed * 2.0) != int((elapsed - dt) * 2.0):   # zona onde estamos (aviso ao entrar)
 		var z: int = map.zone_at(p)
 		if z != _zone:
 			_zone = z
 			hud.show_zone(info.zones[z].name)
-	audio.update(player.running, player.speed_fraction(), cave, dt, player.drifting)
+	audio.update_state(fx_state, dt)
 	if mp:
 		_mp_update(dt)
 	if args.has("log") and mp and int(elapsed) != int(elapsed - dt):
@@ -317,7 +328,9 @@ func _test_hooks(t: float) -> void:
 		print("PRINT ", path, "  portão=", next_cp, "  t=", snappedf(t_race, 0.1), "  fps=", Engine.get_frames_per_second())
 	if args.has("quit") and t >= float(args["quit"]):
 		print("FIM  portão=", next_cp, "/", cps.size(), "  t=", snappedf(t_race, 0.1), "  estado=", state)
-		get_tree().quit()
+		# Libertar os recursos da cena antes de encerrar o renderizador.
+		get_tree().create_timer(0.25, true).timeout.connect(get_tree().quit)
+		queue_free()
 
 func _next_target() -> Vector3:
 	if next_cp < cps.size():
@@ -489,7 +502,7 @@ func _on_fall() -> void:
 		return
 	if args.has("log"):
 		print("CAIU em ", player.global_position)
-	cam.shake()
+	camera_rig.shake()
 	audio.crash()
 	Input.vibrate_handheld(250)
 	hud.set_center("CAIU!", "De volta ao caminho...")
@@ -529,7 +542,8 @@ func respawn(at_gate := false) -> void:
 	player.place(pos, dir, 30.0)
 	player.running = true
 	respawn_timer = -1.0
-	cam.snap()
+	camera_rig.snap()
+	fx.reset()
 	audio.start_run()
 	hud.set_center("")
 
@@ -545,14 +559,18 @@ func _travel(w: Vector2) -> void:
 	player.running = true
 	respawn_timer = -1.0
 	terrain.update_now()
-	cam.snap()
+	camera_rig.snap()
+	fx.reset()
 	_zone = -1
 	if args.has("log"):
 		print("VIAJOU para ", sp[0])
 
 func _on_land(strength: float) -> void:
 	audio.land(strength)
-	cam.kick(clampf(strength / 30.0, 0.2, 1.0))
+	camera_rig.kick(clampf(strength / 30.0, 0.2, 1.0))
+	camera_rig.shake(clampf(strength / 35.0, 0.1, 0.8))
+	fx_state.capture(player, map.in_cave(player.global_position))
+	fx.landing_burst(strength, fx_state)
 	if strength > 14.0:
 		Input.vibrate_handheld(int(clampf(strength * 2.0, 20.0, 80.0)))
 
@@ -562,13 +580,13 @@ func _on_scrape(strength: float) -> void:
 	audio.scrape(strength)
 	if strength > 45.0:
 		audio.bump(strength)
-		cam.shake(0.35)
-	cam.kick(minf(1.0, strength / 40.0))
+		camera_rig.shake(0.35)
+	camera_rig.kick(minf(1.0, strength / 40.0))
 	Input.vibrate_handheld(int(clampf(strength * 1.5, 10.0, 120.0)))
 
 func _on_boost(amount: float) -> void:
 	audio.boost()
-	cam.kick(clampf(amount / 12.0, 0.3, 1.0))
+	camera_rig.kick(clampf(amount / 12.0, 0.3, 1.0))
 	fx.boost_flash()
 
 ## Piloto automático preso durante 4 s (só nos testes): avança 240 m pelo caminho e continua,
@@ -587,7 +605,8 @@ func _check_stuck(dt: float) -> void:
 			var a: Array = r[i]
 			var b: Array = r[i + 1]
 			player.place(Vector3(a[0], a[1], a[2]), Vector2(b[0] - a[0], b[2] - a[2]).normalized(), 30.0)
-			cam.snap()
+			camera_rig.snap()
+			fx.reset()
 		_stuck_t = 0.0
 		_stuck_p = player.global_position
 
@@ -606,6 +625,8 @@ func _adapt_quality(dt: float) -> void:
 		fx.blur_enabled = false
 	elif avg < 40.0 and _quality == 1:
 		_quality = 0
+		environment_system.set_quality("mobile")
+		fx.set_quality("low")
 		sun.shadow_enabled = false
 
 func _load_best() -> float:

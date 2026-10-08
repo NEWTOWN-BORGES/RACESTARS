@@ -167,6 +167,17 @@ static func _fmt(t: float) -> String:
 	return "%02d:%02d,%02d" % [m, sec, c]
 
 func _build() -> void:
+	var quality_script = preload("res://scripts/visual_quality.gd")
+	var quality_button := OptionButton.new()
+	for label in quality_script.LABELS:
+		quality_button.add_item(label)
+	quality_button.select(quality_script.NAMES.find(quality_script.selected()))
+	quality_button.item_selected.connect(func(index: int): quality_script.save(quality_script.NAMES[index]))
+	quality_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	quality_button.position = Vector2(-252, 12)
+	quality_button.size = Vector2(240, 40)
+	quality_button.add_theme_font_size_override("font_size", 18)
+	# Inserido depois do fundo para permanecer visível.
 	_load_events()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg := TextureRect.new()
@@ -190,6 +201,7 @@ func _build() -> void:
 	status_lbl.position = Vector2(-600, -70)
 	status_lbl.size = Vector2(1200, 60)
 	add_child(status_lbl)
+	add_child(quality_button)
 	# principal
 	main_box = _box()
 	name_edit = _edit("O teu nome", "Jogador")

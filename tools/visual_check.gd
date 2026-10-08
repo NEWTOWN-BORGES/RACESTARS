@@ -24,10 +24,11 @@ func _capture() -> void:
 		race.sun.shadow_enabled = false
 	race.set_process(false)
 	race.player.set_physics_process(false)
-	race.cam.set_process(false)
+	race.camera_rig.set_physics_process(false)
+	race.camera_rig.arm.set_physics_process_internal(false)
 	race.hud.visible = false
 	race.fx.blur_layer.hide()
-	for particle in [race.fx.streaks, race.fx.dust, race.fx.trail, race.fx.smoke]:
+	for particle in race.fx.particle_nodes + race.fx.flame_nodes:
 		particle.visible = false
 	# Concluir o aquecimento antes das fotografias, que não avançam a corrida.
 	for frame in 5:

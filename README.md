@@ -185,3 +185,11 @@ As capturas precisam de um ecrã gráfico/OpenGL (não funcionam com `--headless
 sem diretórios de utilizador graváveis, configure `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` e `XDG_DATA_HOME`
 para diretórios de trabalho graváveis. As validações feitas em Linux/Compatibility não medem o
 desempenho num telemóvel Android.
+
+### Câmera e sistema visual
+
+A câmera usa colisão, primeira pessoa e FOV progressivo. Poeira, spray, vento,
+propulsão e áudio recebem o mesmo estado do veículo. O menu oferece perfis
+**Leve, Equilibrado e Alto** para iluminação, reflexos e partículas ambientais.
+Detalhes e comandos de verificação: [sistemas visuais](docs/visual-systems.md).
+Estas alterações estão no projeto Godot; o APK 0.6 ainda precisa de nova exportação.

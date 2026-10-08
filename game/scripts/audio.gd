@@ -14,6 +14,13 @@ var _reverb_wet := 0.0
 var _scrape_cd := 0.0
 var S := {}
 
+func _exit_tree() -> void:
+	for child in get_children():
+		if child is AudioStreamPlayer:
+			child.stop()
+			child.stream = null
+	S.clear()
+
 func _ready() -> void:
 	fx_bus = AudioServer.get_bus_index("Efeitos")
 	if fx_bus < 0:   # só cria uma vez (a cena é recarregada ao recomeçar)
@@ -102,7 +109,10 @@ func land(strength: float) -> void:
 func near_miss(frac: float) -> void:
 	_play("whoosh", randf_range(0.9, 1.15) + frac * 0.3, -2.0)
 
-func update(running: bool, frac: float, in_tunnel: bool, dt: float, drifting := false) -> void:
+func update_state(state: RefCounted, dt: float) -> void:
+	update(state.running, state.speed_ratio, state.in_tunnel, dt, state.drifting, state.throttle, state.boost_ratio)
+
+func update(running: bool, frac: float, in_tunnel: bool, dt: float, drifting := false, throttle := 1.0, boost := 0.0) -> void:
 	_scrape_cd -= dt
 	var dv := -10.0 if (drifting and running) else -60.0
 	drift.volume_db = move_toward(drift.volume_db, dv, dt * (90.0 if drifting else 60.0))
@@ -111,8 +121,9 @@ func update(running: bool, frac: float, in_tunnel: bool, dt: float, drifting := 
 	elif drift.volume_db <= -59.0 and drift.playing:
 		drift.stop()
 	if running:
-		engine.pitch_scale = lerpf(engine.pitch_scale, 0.7 + frac * 1.15, 1.0 - exp(-dt * 6.0))
-		engine.volume_db = lerpf(-13.0, -6.0, frac) + (2.0 if in_tunnel else 0.0)
+		engine.pitch_scale = lerpf(engine.pitch_scale, 0.65 + frac * 0.95 + throttle * 0.15 + boost * 0.12, 1.0 - exp(-dt * 6.0))
+		var db := lerpf(-16.0, -9.0, throttle) + frac * 3.0 + boost + (2.0 if in_tunnel else 0.0)
+		engine.volume_db = lerpf(engine.volume_db, db, 1.0 - exp(-dt * 5.0))
 		wind.volume_db = lerpf(-28.0, -8.0, frac)
 		wind.pitch_scale = 0.9 + frac * 0.5
 	else:

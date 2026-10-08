@@ -47,6 +47,8 @@ var drift_charge := 0.0
 var boost := 0.0
 var slip := 0.0
 var ground_normal := Vector3.UP
+var ground_valid := false
+var ground_point := Vector3.ZERO
 var steer_visual := 0.0
 var autopilot := false
 var route: Array = []
@@ -69,6 +71,7 @@ var _ground_pitch := 0.0         # inclinação do chão entre a frente e a tras
 @onready var model: Node3D = $Model
 
 func _ready() -> void:
+	preload("res://scripts/model_materials.gd").apply_vehicle(model)
 	motion_mode = MOTION_MODE_FLOATING
 	collision_mask = SOLID_MASK
 	wall_min_slide_angle = deg_to_rad(10.0)
@@ -91,6 +94,14 @@ func place(pos: Vector3, dir: Vector2, start_speed: float) -> void:
 	vel = forward() * start_speed
 	rotation = Vector3(0.0, heading, 0.0)
 	ground_normal = Vector3.UP
+	ground_valid = false
+	ground_point = Vector3.ZERO
+	on_ground = false
+	on_water = false
+	drifting = false
+	drift_charge = 0.0
+	boost = 0.0
+	_air_time = 0.0
 	model.basis = Basis()
 	visual_pitch = 0.0
 	_pitch_v = 0.0
@@ -142,9 +153,11 @@ func _physics_process(dt: float) -> void:
 	q.exclude = [get_rid()]
 	q.collision_mask = RIDE_MASK
 	var hit := space.intersect_ray(q)
+	ground_valid = not hit.is_empty()
 	var ground_y := -INF
 	on_water = false
 	if not hit.is_empty():
+		ground_point = hit.position
 		ground_y = hit.position.y
 		ground_normal = ground_normal.lerp(hit.normal, 0.25).normalized()
 		on_water = hit.collider != null and hit.collider.has_meta("water")

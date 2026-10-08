@@ -117,7 +117,9 @@ func _prop(name: String) -> Dictionary:
 		var m := mesh.surface_get_material(i)
 		if m is StandardMaterial3D:
 			(m as StandardMaterial3D).vertex_color_use_as_albedo = true
-			(m as StandardMaterial3D).specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			(m as StandardMaterial3D).specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+			if not m.emission_enabled and m.metallic < 0.3:
+				m.roughness = maxf(m.roughness, 0.78)
 			if name.trim_suffix("_big") in ["tree_acacia", "tree_acacia_b", "tree_giant", "bush", "pine", "palm", "fern"] and not m.emission_enabled:
 				mesh.surface_set_material(i, foliage_mat)
 	props[name] = {"mesh": mesh, "shape": shape, "cyl": c is Array, "h": (c[1] if c is Array else 0.0)}

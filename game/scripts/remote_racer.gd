@@ -22,6 +22,7 @@ func setup(id: int, pname: String, c: Color) -> void:
 	color = c
 	model = preload("res://assets/models/vespa.glb").instantiate()
 	add_child(model)
+	preload("res://scripts/model_materials.gd").apply_vehicle(model)
 	tint(model, c)
 	var light := OmniLight3D.new()
 	light.light_color = c
