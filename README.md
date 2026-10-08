@@ -8,7 +8,8 @@ planície de sal, vale dos cristais e oásis.
 O mundo é uma ilha irregular rodeada de mar, com baías, enseadas, penínsulas e praias entre as 16 zonas.
 Tem colinas por todo o lado e serras à volta das estradas. As estradas correm pelos vales.
 Há **mais de 100 mil plantas e rochas** (florestas cerradas de pinheiros e árvores gigantes, savana de acácias,
-palmeiras nos oásis, cactos no deserto, cristais) e nada é animado, para o telemóvel aguentar.
+palmeiras nos oásis, cactos no deserto, cristais). O vento nas copas, as bandeiras e as aves são animados
+por shaders, com alcance limitado, sem simulação individual de cada planta.
 No horizonte há **estruturas colossais**, que se vêem a muitos km:
 - guardiões de pedra com ~290 m;
 - o esqueleto de um animal gigante, por baixo do qual a estrada passa;
@@ -18,6 +19,22 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 - ilhas flutuantes.
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
+
+## Ilha e cenários
+
+- A costa é recortada depois das estradas e serras: baías, penínsulas, praias e oceano navegável.
+  Uma máscara separa o mar dos túneis e ravinas interiores, mesmo quando estão abaixo do nível do mar.
+- Doze conjuntos de arquitetura junto às rotas: Porto do Sol, Farol das Marés, Santuário do Cenote,
+  mercados, observatórios e ruínas com anéis partidos. A colocação verifica todas as variantes das pistas.
+- Oceano turquesa junto à costa, espuma por profundidade e ondulação que suaviza à distância.
+- Luz solar mais baixa, sombras frias, rocha estratificada com relevo superficial e planeta com anéis no céu.
+
+As 16 regiões e os traçados da versão 0.6 permanecem. O gerador verifica o chão e as margens das pistas
+antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gravados.
+
+![Santuário do Cenote e as novas copas](screenshots/18-santuario-da-ilha.png)
+
+[Porto do Sol](screenshots/16-porto-da-ilha.png) · [Farol e costa](screenshots/17-costa-da-ilha.png)
 
 ## Modos de jogo
 
@@ -40,6 +57,9 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ## Instalar no telemóvel (Android)
 
+O APK em `apk/` corresponde à versão 0.6. Para jogar com as alterações da ilha e dos cenários,
+é necessário gerar um novo APK a partir deste código (instruções abaixo).
+
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
 (se pedir, permita "instalar apps de fontes desconhecidas"). Jogue com o telemóvel deitado.
 
@@ -60,7 +80,7 @@ Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
 
 ## O mapa
 
-![Mapa](screenshots/00-mapa.jpg)
+![Mapa da ilha](game/assets/map/minimap.png)
 
 - Cada cor de linha é um nível:
   - azul: túneis e grutas;
@@ -88,7 +108,8 @@ Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
 
 **Desempenho no telemóvel:**
 - **Terreno sem engasgos:** nada é construído durante o jogo. São 5 grelhas planas partilhadas, e a placa gráfica lê a altura de cada ponto de uma textura.
-- **Tudo estático:** sem animações nas plantas e nos animais. As peças são desenhadas em grupos e só até à distância a que se vêem.
+- **Instâncias agrupadas:** peças e copas são desenhadas em grupos com distância de visibilidade.
+  Vento, bandeiras e aves usam animação no shader; fauna no chão mantém-se estática.
 - **Colisões leves:** são criadas diretamente no servidor de física.
 - **Mapa comprimido:** alturas em passos de 12,5 cm, comprimidas com zstd.
 - **Qualidade automática:** se o telemóvel não aguentar, a qualidade baixa sozinha.
@@ -117,8 +138,17 @@ Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
 ```bash
 pip install numpy scipy pillow zstandard bpy==5.0.1
 python tools/make_map.py              # mundo (game/assets/map/) — mostra os problemas encontrados nos caminhos
+python tools/island_check.py          # costa, rotas, vegetação e colisões do mar
 python blender/build_assets.py        # peças .glb (túneis e pontes à medida de map.json)
 python tools/make_sounds.py           # sons
+```
+
+Para regenerar apenas as quatro árvores com copas irregulares, sem recriar os restantes modelos
+ou o arquivo `.blend`:
+
+```bash
+blender -b --factory-startup -P blender/build_assets.py -- --vegetation-only
+python tools/vegetation_check.py --compare-ref 0bd6885
 ```
 
 ## Gerar o APK
@@ -142,3 +172,16 @@ godot --path game -- --mode=explorar --travel=5000,3000
 godot --path game -- --host --players=2 --mode=explorar
 godot --path game -- --join=127.0.0.1
 ```
+
+Verificação da ilha contra a versão 0.6 e capturas reais dos novos cenários:
+
+```bash
+python tools/island_check.py --baseline-ref 0bd6885
+godot --headless --path game --script ../tools/island_runtime_check.gd
+godot --path game --script ../tools/visual_check.gd -- --out=/tmp/racestars-visual
+```
+
+As capturas precisam de um ecrã gráfico/OpenGL (não funcionam com `--headless`). Em ambientes cloud
+sem diretórios de utilizador graváveis, configure `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` e `XDG_DATA_HOME`
+para diretórios de trabalho graváveis. As validações feitas em Linux/Compatibility não medem o
+desempenho num telemóvel Android.

@@ -3,7 +3,7 @@
 shader_type spatial;
 render_mode specular_disabled;
 
-uniform vec3 fog_col : source_color = vec3(0.93, 0.83, 0.70);
+uniform vec3 fog_col : source_color = vec3(0.64, 0.75, 0.80);
 uniform float fog_start = 900.0;
 uniform float fog_span = 15000.0;
 uniform float fog_max = 0.86;

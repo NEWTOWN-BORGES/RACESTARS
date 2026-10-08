@@ -25,6 +25,7 @@ from scipy.spatial import cKDTree
 from scipy.ndimage import gaussian_filter, gaussian_filter1d, distance_transform_edt, binary_dilation, zoom
 from PIL import Image, ImageDraw
 import zstandard
+from island import coastline, shape_coast, ocean_rectangles
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.normpath(os.path.join(HERE, '..', 'game', 'assets', 'map'))
@@ -117,21 +118,8 @@ H = np.zeros_like(X)
 for k, a in enumerate(AREAS):
     H += RELIEF[a[5]] * W_area[k] / wsum
 del RELIEF
-# costa irregular da ilha: a silhueta combina enseadas, penínsulas e baías,
-# mantendo o centro jogável e baixando suavemente o terreno até ao oceano.
-# O mapa continua quadrado para facilitar streaming, mas o mundo visível passa
-# a ser uma ilha com mar em toda a volta.
-ang = np.arctan2(Z, X)
-coast_noise = (0.55 * np.sin(3.0 * ang + 0.45) +
-               0.28 * np.sin(7.0 * ang - 1.1) +
-               0.17 * np.sin(11.0 * ang + 2.0))
-radius = 11200.0 + 1150.0 * coast_noise + 420.0 * fbm(X / 850.0, Z / 850.0, oct=3)
-dist = np.sqrt(X * X + Z * Z)
-coast = smooth(radius - 700.0, radius + 260.0, dist)
-# borda exterior funda-se no nível do mar; a transição larga evita uma parede
-# artificial e deixa praias e falésias coerentes com os biomas costeiros.
-H = H * (1.0 - coast) + (WATER_Y - 1.5 + 1.5 * fbm(X / 180.0, Z / 180.0, oct=2)) * coast
-H = H.astype(np.float32)
+# A costa é esculpida DEPOIS das colinas e estradas. Fazê-lo aqui deixava
+# os caminhos costeiros sem apoio e as serras posteriores tapavam o oceano.
 
 def sample_arr(A, P):
     fx = (P[:, 0] + HALF) / CELL; fz = (P[:, 1] + HALF) / CELL
@@ -1067,11 +1055,11 @@ for k, a in enumerate(AREAS):
 rg = 1.0 - np.abs(2.0 * fbm(MX / 1500 + 7, MZ / 1500 - 3, oct=4) - 1.0)     # cristas (ruído "ridged")
 mass = smooth(0.25, 0.7, fbm(MX / 3200 - 9, MZ / 3200 + 4, oct=2))
 far_c = ampf * (0.25 + 0.75 * rg ** 1.6) * (0.45 + 0.55 * mass) * smooth(240.0, 1150.0, path_d) * free_c
-far_c *= 1 - smooth(11000.0, 11800.0, np.maximum(np.abs(MX), np.abs(MZ)))   # a borda já tem a sua cordilheira
+far_c *= 1 - smooth(11000.0, 11800.0, np.maximum(np.abs(MX), np.abs(MZ)))
 FAR = zoom(far_c.astype(np.float32), RES / NM, order=1)
 U += FAR
 print('  serras: altura média %.0f m, máx %.0f m' % (float(FAR.mean()), float(FAR.max())))
-del FAR, far_c, ampf, rg, mass, path_d, occ, MX, MZ, pin_d, free_c
+del FAR, far_c, ampf, rg, mass, occ, MX, MZ, pin_d, free_c
 H += U
 gz_, gx_ = np.gradient(U, CELL)
 slope_u = np.hypot(gx_, gz_)
@@ -1087,6 +1075,27 @@ for s_ in all_secs:
         p.h = p.h + uu
         p.ht = p.ht + uu
 hub_y = [GROUND + U_at(hb[0], hb[1]) for hb in hubs]
+
+# ------------------------------------------------------------------ ilha e oceano
+print('costa da ilha...')
+coast_distance = coastline(X, Z, path_d, [area_center(a[0], a[1]) for a in AREAS], HALF)
+del path_d
+# Verificar também as margens das pistas: a costa não pode alterar o chão,
+# saltos, túneis ou apoios das pontes, nem apenas manter a linha central.
+route_edges = np.vstack([p.P + np.stack([-p.T[:, 1], p.T[:, 0]], 1) * off
+                         for s_ in all_secs for p in s_.paths for off in (-p.hw, 0.0, p.hw)])
+support_before_coast = sample(route_edges)
+H = shape_coast(H, coast_distance, WATER_Y)
+coast_error = float(np.max(np.abs(sample(route_edges) - support_before_coast)))
+assert coast_error < 1e-5, f'A costa alterou pistas existentes em {coast_error:.3f} m'
+assert max(H[0].max(), H[-1].max(), H[:, 0].max(), H[:, -1].max()) < WATER_Y
+assert np.all(sample(np.array([area_center(a[0], a[1]) for a in AREAS])) > WATER_Y)
+ocean = {'y': WATER_Y, 'size': SIZE * 4.0, 'mask': 'res://assets/map/ocean_mask.png', 'mask_size': SIZE,
+         'collision_rects': ocean_rectangles(coast_distance, SIZE, SIZE * 4.0)}
+print(f'  mar: {100 * np.mean(coast_distance < 0):.1f}% do mapa | '
+      f'pistas/margens: {len(route_edges)} amostras, alteração máxima {coast_error:.6f} m | '
+      f'colisões do oceano: {len(ocean["collision_rects"])}')
+del route_edges, support_before_coast
 
 # ------------------------------------------------------------------ biomas
 print('biomas...')
@@ -1585,7 +1594,7 @@ for a in AREAS:
         kind = 'grazer' if a[4] != 'savanna' or rng.random() < 0.7 else 'grazer_tall'
         for m in range(int(rng.integers(5, 11))):
             q = hc + rng.normal(0, 28, 2)
-            if free_of_paths(q[0], q[1], 60):
+            if free_of_paths(q[0], q[1], 60) and height_at(q[0], q[1]) > WATER_Y + 1.5:
                 herds.append([kind, round(float(q[0]), 1), round(height_at(q[0], q[1]), 2), round(float(q[1]), 1),
                               round(float(rng.uniform(-math.pi, math.pi)), 2), round(float(rng.uniform(0.85, 1.2)), 2)])
 
@@ -1734,6 +1743,10 @@ open(os.path.join(OUT, 'height.zst'), 'wb').write(zc.compress((np.round(H / CELL
 del occ_q, near_q, qstep
 open(os.path.join(OUT, 'biome.zst'), 'wb').write(zc.compress(biome8.tobytes()))
 open(os.path.join(OUT, 'veg.zst'), 'wb').write(zc.compress(veg_words.tobytes()))
+# Máscara branca só no mar exterior. Túneis e ravinas interiores abaixo de
+# zero permanecem secos; o mesmo domínio é usado pelo shader e pela colisão.
+ocean_mask = (smooth(16.0, -16.0, coast_distance) * 255).astype(np.uint8)
+Image.fromarray(ocean_mask).resize((1536, 1536), Image.Resampling.BILINEAR).save(os.path.join(OUT, 'ocean_mask.png'))
 CH = 128
 nch = (RES - 1) // CH
 chunks = []
@@ -1744,7 +1757,7 @@ for cz in range(nch):
 data = {'size': SIZE, 'res': RES, 'cell': CELL, 'ground': GROUND, 'water_y': WATER_Y, 'fall_y': FALL_Y,
         'biome_res': BRES, 'chunk_cells': CH, 'chunks': chunks, 'zones': zones,
         'start': start, 'finish': finish, 'checkpoints': checkpoints, 'sections': sections,
-        'tunnels': tunnels, 'bridges': bridges, 'aqueducts': aqueducts, 'waters': waters, 'roofs': roofs,
+        'tunnels': tunnels, 'bridges': bridges, 'aqueducts': aqueducts, 'waters': waters, 'roofs': roofs, 'ocean': ocean,
         'props': props, 'grass': ground_cover['grass_tuft'], 'flowers': ground_cover['flowers'], 'ferns': ground_cover['fern'],
         'islands': islands, 'banners': banners, 'herds': herds, 'colossi': colossi, 'events': events, 'pads': pads,
         'veg_count': int(nveg), 'veg_types': VEG_TYPES}
@@ -1768,14 +1781,16 @@ col = col * (1 - bz[..., 2:3] * 0.8) + red * bz[..., 2:3] * 0.8
 col = col * (1 - bz[..., 0:1] * 0.9) + grassc * bz[..., 0:1] * 0.9
 col = col * (1 - bz[..., 1:2] * 0.8) + jung * bz[..., 1:2] * 0.8
 col *= shade[..., None]
-in_water = np.zeros(hs.shape, bool)
+in_water = coast_distance[::3, ::3][:1024, :1024] < 0.0
 Xm, Zm = X[::3, ::3][:1024, :1024], Z[::3, ::3][:1024, :1024]
 for wb in waters:
     cy, sy = math.cos(wb['yaw']), math.sin(wb['yaw'])
     rx = (Xm - wb['c'][0]) * cy - (Zm - wb['c'][1]) * sy
     rz = (Xm - wb['c'][0]) * sy + (Zm - wb['c'][1]) * cy
     in_water |= (np.abs(rx) < wb['sx']) & (np.abs(rz) < wb['sz']) & (hs < WATER_Y)
-col = np.where(in_water[..., None], np.array([70, 140, 190]) * (0.85 + 0.15 * shade[..., None]), col)
+depth = smooth(0.0, 60.0, WATER_Y - hs)[..., None]
+sea_color = np.array([71, 183, 187]) * (1 - depth) + np.array([22, 71, 116]) * depth
+col = np.where(in_water[..., None], sea_color, col)
 img = Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).resize((MM, MM), Image.LANCZOS)
 dr = ImageDraw.Draw(img)
 dr.rectangle([0, 0, MM - 1, MM - 1], outline=(25, 18, 12), width=6)   # fora do mapa o minimapa fica escuro (sem riscas)

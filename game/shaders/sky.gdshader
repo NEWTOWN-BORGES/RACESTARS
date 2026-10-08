@@ -1,15 +1,14 @@
-// Céu do deserto: azul profundo no alto, horizonte quente e empoeirado, sol forte,
-// fiapos de nuvem alta, uma lua pálida e mesas/serras distantes na neblina.
+// Atmosfera da ilha: azul oceânico, luz dourada, cirros e um planeta com anéis.
+// Tudo é analítico: sem texturas, volumetria ou pós-processamento pesado no Android.
 shader_type sky;
 render_mode use_debanding;
 
-uniform vec3 zenith : source_color = vec3(0.20, 0.40, 0.76);
-uniform vec3 mid_sky : source_color = vec3(0.50, 0.68, 0.90);
-uniform vec3 horizon : source_color = vec3(0.95, 0.85, 0.71);
-uniform vec3 sun_color : source_color = vec3(1.0, 0.93, 0.78);
-uniform vec3 cloud_col : source_color = vec3(1.0, 0.97, 0.93);
-uniform vec3 ridge_far : source_color = vec3(0.86, 0.73, 0.62);
-uniform vec3 ridge_near : source_color = vec3(0.74, 0.55, 0.42);
+uniform vec3 zenith : source_color = vec3(0.12, 0.31, 0.52);
+uniform vec3 mid_sky : source_color = vec3(0.40, 0.62, 0.76);
+uniform vec3 horizon : source_color = vec3(0.72, 0.81, 0.83);
+uniform vec3 sun_color : source_color = vec3(1.0, 0.78, 0.48);
+uniform vec3 cloud_col : source_color = vec3(0.93, 0.91, 0.82);
+uniform vec3 planet_color : source_color = vec3(0.75, 0.71, 0.80);
 uniform vec3 moon_dir = vec3(-0.55, 0.42, -0.72);
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -23,13 +22,6 @@ float fbm(vec2 p) {
 	for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
 	return s;
 }
-// silhueta de mesas: patamares planos com encostas íngremes
-float mesas(float az, float seed, float base, float amp) {
-	float n = vnoise(vec2(az * 9.0 + seed, seed));
-	float m = smoothstep(0.42, 0.5, n) * amp;
-	return base + m + vnoise(vec2(az * 60.0, seed + 3.0)) * amp * 0.12;
-}
-
 void sky() {
 	vec3 d = EYEDIR;
 	float h = d.y;
@@ -37,32 +29,40 @@ void sky() {
 	col = mix(col, zenith, smoothstep(0.22, 0.9, h));
 
 	float cs = max(dot(d, LIGHT0_DIRECTION), 0.0);
-	col += sun_color * (pow(cs, 4.0) * 0.22 + pow(cs, 60.0) * 0.6);
+	col += sun_color * (pow(cs, 5.0) * 0.18 + pow(cs, 80.0) * 0.5);
 
-	// lua pálida de dia
+	// Planeta distante: disco sombreado e anéis inclinados. O lado dianteiro dos
+	// anéis passa sobre o disco; o resto fica oculto, sem transparência em geometria.
 	vec3 md = normalize(moon_dir);
-	float cm = dot(d, md);
-	float moon = smoothstep(0.99955, 0.99965, cm);
-	float crater = vnoise(d.xy * 900.0) * 0.12;
-	col = mix(col, vec3(0.93, 0.93, 0.98) - crater, moon * 0.45);
+	vec3 right = normalize(cross(md, vec3(0.0, 1.0, 0.0)));
+	vec3 up = cross(right, md);
+	vec2 planet_uv = vec2(dot(d, right), dot(d, up)) / 0.065;
+	float facing = step(0.0, dot(d, md));
+	float radius = length(planet_uv);
+	float planet = (1.0 - smoothstep(0.97, 1.0, radius)) * facing;
+	vec2 ring_uv = vec2(planet_uv.x * 0.94 + planet_uv.y * 0.34, -planet_uv.x * 0.34 + planet_uv.y * 0.94);
+	float ring_radius = length(vec2(ring_uv.x, ring_uv.y * 3.0));
+	float ring = smoothstep(1.24, 1.31, ring_radius) * (1.0 - smoothstep(1.94, 2.02, ring_radius));
+	ring *= (0.65 + 0.35 * smoothstep(1.63, 1.67, ring_radius)) * facing;
+	vec3 rings = mix(planet_color, cloud_col, 0.55);
+	col = mix(col, rings, ring * 0.26 * (1.0 - planet));
+	float sphere_z = sqrt(max(0.0, 1.0 - radius * radius));
+	float phase = clamp(dot(vec3(planet_uv, sphere_z), normalize(vec3(-0.7, 0.3, 0.8))), 0.0, 1.0);
+	float bands = sin(planet_uv.y * 22.0 + planet_uv.x * 4.0) * 0.035;
+	col = mix(col, planet_color * (0.64 + phase * 0.4 + bands), planet * 0.58);
+	col = mix(col, rings, ring * planet * step(ring_uv.y, 0.0) * 0.4);
 
 	// nuvens altas finas (cirros)
 	if (h > 0.0) {
 		vec2 uv = d.xz / (h + 0.08);
 		float n = fbm(uv * vec2(0.5, 2.2) + vec2(4.0, 1.0));
-		float c = smoothstep(0.56, 0.78, n) * smoothstep(0.02, 0.15, h) * (1.0 - smoothstep(0.5, 0.95, h));
-		col = mix(col, cloud_col + sun_color * pow(cs, 6.0) * 0.3, c * 0.55);
+		float c = smoothstep(0.48, 0.73, n) * smoothstep(0.02, 0.15, h) * (1.0 - smoothstep(0.5, 0.95, h));
+		col = mix(col, cloud_col + sun_color * pow(cs, 6.0) * 0.15, c * 0.66);
 	}
 
-	// mesas e serras distantes, apagadas pela poeira
-	float az = atan(d.x, -d.z);
-	float r1 = mesas(az, 1.3, 0.012, 0.028) + 0.01 * sin(az * 3.0 + 0.5);
-	float r2 = mesas(az, 7.9, 0.004, 0.016);
-	vec3 haze = mix(horizon, ridge_far, 0.55) + sun_color * pow(cs, 8.0) * 0.15;
-	col = mix(col, haze, smoothstep(0.0015, 0.0, h - r1) * 0.75);
-	col = mix(col, mix(ridge_near, horizon, 0.35), smoothstep(0.0015, 0.0, h - r2) * 0.85);
-	if (h < 0.0) col = mix(ridge_near, horizon, 0.55);
+	// Horizonte marinho aberto: o relevo distante vem da ilha real.
+	if (h < 0.0) col = horizon * (1.0 + h * 0.22);
 
-	float disk = smoothstep(0.9993, 0.9996, cs);
+	float disk = smoothstep(0.99972, 0.99984, cs);
 	COLOR = col + disk * sun_color * 3.0;
 }

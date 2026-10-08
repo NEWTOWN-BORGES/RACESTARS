@@ -7,6 +7,7 @@
 .godot/
 Thumbs.db
 blender/__pycache__/
+__pycache__/
 build/
 export/
 node_modules/

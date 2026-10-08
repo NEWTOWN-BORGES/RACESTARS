@@ -5,6 +5,9 @@ render_mode specular_schlick_ggx;
 uniform vec3 deep : source_color = vec3(0.04, 0.20, 0.32);
 uniform vec3 shallow : source_color = vec3(0.10, 0.42, 0.50);
 uniform vec3 sky_tint : source_color = vec3(0.45, 0.66, 0.82);
+uniform sampler2D heightmap : filter_linear, repeat_disable;
+uniform float map_size = 24576.0;
+uniform float height_cell = 8.0;
 varying vec3 wpos;
 
 void vertex() {
@@ -22,11 +25,17 @@ vec2 wave_grad(vec2 p, float t) {
 
 void fragment() {
 	vec2 g = wave_grad(wpos.xz, TIME);
-	vec3 nw = normalize(vec3(-g.x * 0.35, 1.0, -g.y * 0.35));
+	float wave_fade = 1.0 - smoothstep(250.0, 2200.0, length(VERTEX));
+	vec3 nw = normalize(vec3(-g.x * 0.10 * wave_fade, 1.0, -g.y * 0.10 * wave_fade));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	vec3 c = mix(deep, shallow, 0.35 + 0.25 * g.x);
+	vec2 resolution = vec2(textureSize(heightmap, 0));
+	vec2 uv = ((wpos.xz / map_size + vec2(0.5)) * (resolution - vec2(1.0)) + vec2(0.5)) / resolution;
+	float depth = max(0.0, wpos.y - texture(heightmap, uv).r * height_cell);
+	vec3 c = mix(shallow, deep, smoothstep(0.5, 18.0, depth));
 	c = mix(c, sky_tint, fres * 0.45);
+	float foam = (1.0 - smoothstep(0.0, 1.7, depth)) * smoothstep(0.50, 0.95, sin(depth * 3.0 - TIME + g.x) * 0.5 + 0.5);
+	c = mix(c, vec3(0.70, 0.83, 0.77), foam * 0.45);
 	ALBEDO = c;
 	ROUGHNESS = 0.3;
 	SPECULAR = 0.25;

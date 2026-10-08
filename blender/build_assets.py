@@ -4,6 +4,7 @@ RACESTARS — modelagem dos objetos do mapa e do veículo no Blender (procedural
 Uso (qualquer um dos dois):
   blender -b -P blender/build_assets.py -- [--preview]      # Blender 5.0+ instalado
   python blender/build_assets.py [--preview]                # com `pip install bpy==5.0.1`
+  blender -b -P blender/build_assets.py -- --vegetation-only # apenas quatro árvores, sem .blend/render
 
 Gera:
   game/assets/models/<peça>.glb     -> importados automaticamente pelo Godot
@@ -317,12 +318,36 @@ def make_acacia(name, seed, H=10.0):
     t2 = -t1 * 1.4
     m.cone('trunk', 0.38, 0.25, H * 0.32, T(*top1) @ RY(t2) @ T(0, 0, H * 0.16), segs=7)
     top2 = top1 + (RY(t2) @ Vector((0, 0, H * 0.32, 1))).to_3d()
-    for ang in (35, -40):
-        m.cone('trunk', 0.24, 0.12, H * 0.3, T(*top1) @ RX(ang * 0.4) @ RY(ang) @ T(0, 0, H * 0.15), segs=6)
-    canopy(m, top2.x, top2.y, top2.z + 0.2, H * 0.42, seed)
-    canopy(m, top1.x + H * 0.25, top1.y + 0.5, top1.z + H * 0.18, H * 0.3, seed + 1)
-    canopy(m, top1.x - H * 0.28, top1.y - 0.4, top1.z + H * 0.12, H * 0.26, seed + 2)
+    # Oito copas volumétricas pequenas formam uma copa aberta e assimétrica.
+    # 280 triângulos, incluindo seis ramos ligados ao tronco (antes: 196).
+    palette = ('leaf', 'leaf_light', 'leaf_dark')
+    for k in range(6):
+        angle = k * math.tau / 6 + rnd.uniform(-0.32, 0.32)
+        reach = H * rnd.uniform(0.22, 0.31)
+        center = Vector((top2.x + math.cos(angle) * reach,
+                         top2.y + math.sin(angle) * reach * 0.66,
+                         H * rnd.uniform(0.61, 0.75)))
+        wood_branch(m, top1.lerp(top2, 0.28), center, 0.23, 0.075, 'trunk', 4)
+        foliage_clump(m, center, (H * 0.22, H * 0.18, H * rnd.uniform(0.10, 0.14)),
+                      palette, seed * 10 + k)
+    for k in range(2):
+        center = top2 + Vector(((-0.7 if k else 0.6), (-0.65 if k else 0.45), -H * 0.025))
+        foliage_clump(m, center, (H * 0.23, H * 0.17, H * 0.10), palette, seed * 10 + 8 + k)
     return m.done()
+
+def wood_branch(m, start, end, radius, tip, material='bark', segments=6):
+    """Um ramo entre pontos explícitos: a folha fica presa à extremidade."""
+    start, end = Vector(start), Vector(end)
+    direction = end - start
+    m.cone(material, radius, tip, direction.length,
+           T(*((start + end) * 0.5)) @ align_z(direction), segs=segments)
+
+def foliage_clump(m, center, radii, palette, seed, subdivisions=1):
+    """Volume de folhas irregular, com faces claras acima e sombra sob a copa."""
+    rnd = random.Random(seed)
+    vs = m.ico(palette[0], 1.0, T(*center) @ RZ(rnd.uniform(0, 360)) @ S(*radii), sub=subdivisions)
+    m.jitter(vs, min(radii) * 0.28, 0.34, seed, radial=False)
+    m.paint(vs, lambda f: palette[1] if f.normal.z > 0.38 else (palette[2] if f.normal.z < -0.28 else palette[0]))
 
 def make_mushroom(name, seed, H=15.0):
     rnd = random.Random(seed); m = Mesh(name)
@@ -967,11 +992,19 @@ def make_fern(name, seed):
 def make_pine(name, seed):
     rnd = random.Random(seed); m = Mesh(name)
     h = rnd.uniform(13, 17)
-    m.cone('bark', 0.55, 0.3, h * 0.35, T(0, 0, h * 0.175), segs=7)
-    for k in range(4):
-        z = h * (0.22 + k * 0.18); r = lerp(3.4, 1.2, k / 3)
-        vs = m.cone('pine' if k % 2 == 0 else 'pine_light', r, 0.05, h * 0.32, T(0, 0, z + h * 0.16) @ RZ(rnd.uniform(0, 60)), segs=9)
-        m.jitter(vs, 0.25, 0.6, seed + k, radial=True)
+    m.cone('bark', 0.55, 0.12, h * 0.88, T(0, 0, h * 0.44), segs=7)
+    # Sete massas de agulhas em espiral quebram os antigos cones concêntricos.
+    for k in range(7):
+        t = k / 6
+        angle = k * 2.4 + rnd.uniform(-0.3, 0.3)
+        reach = lerp(1.28, 0.15, t)
+        z = h * lerp(0.34, 0.90, t)
+        center = Vector((math.cos(angle) * reach, math.sin(angle) * reach, z))
+        if k < 6:
+            wood_branch(m, (0, 0, z - h * 0.12), center, 0.17, 0.055, 'bark', 3)
+        width = lerp(2.12, 0.95, t)
+        foliage_clump(m, center, (width, width * 0.86, h * lerp(0.20, 0.13, t)),
+                      ('pine', 'pine_light', 'leaf_dark'), seed * 10 + k)
     return m.done()
 
 def make_giant_tree(name, seed):
@@ -983,16 +1016,23 @@ def make_giant_tree(name, seed):
         a = k * math.tau / 6 + rnd.uniform(-0.3, 0.3)
         d = Vector((math.cos(a), math.sin(a), 0))
         m.cone('bark', 1.2, 0.3, 7.0, T(*(d * 3.6 + Vector((0, 0, 1.2)))) @ align_z(d + Vector((0, 0, -0.35))), segs=6)
-    for k in range(3):   # ramos
-        a = rnd.uniform(0, math.tau); d = Vector((math.cos(a), math.sin(a), 0.7)).normalized()
-        m.cone('bark', 1.0, 0.4, 10.0, T(*(Vector((0, 0, H * 0.72)) + d * 5)) @ align_z(d), segs=6)
-    for k, (z, r) in enumerate(((H + 2, 15.0), (H + 9, 12.0), (H + 14, 7.0))):
-        vs = m.sphere('giant_leaf', r, T(rnd.uniform(-2, 2), rnd.uniform(-2, 2), z) @ S(1, 1, 0.42), u=14, v=7)
-        m.jitter(vs, r * 0.08, 0.15, seed + k, radial=False)
-        m.paint(vs, lambda f: 'giant_leaf_light' if f.normal.z > 0.55 else ('giant_leaf_dark' if f.normal.z < -0.3 else None))
+    # Ramos bifurcados e doze volumes sobrepostos dão à árvore gigante uma silhueta
+    # viva, com clareiras entre os ramos; mantêm-se o tronco e as raízes de colisão.
+    palette = ('giant_leaf', 'giant_leaf_light', 'giant_leaf_dark')
+    for k in range(10):
+        angle = k * 2.4 + rnd.uniform(-0.2, 0.2)
+        reach = rnd.uniform(5.4, 8.0)
+        center = Vector((math.cos(angle) * reach, math.sin(angle) * reach,
+                         H + rnd.uniform(-1.0, 9.0)))
+        branch_start = Vector((0, 0, H * rnd.uniform(0.67, 0.88)))
+        wood_branch(m, branch_start, center, 1.0, 0.3)
+        foliage_clump(m, center, (rnd.uniform(6.2, 8.0), rnd.uniform(5.2, 7.3), rnd.uniform(3.4, 5.5)),
+                      palette, seed * 10 + k, subdivisions=2)
+    foliage_clump(m, Vector((-1.8, 0.2, 37.8)), (9.0, 7.4, 5.8), palette, seed * 10 + 11, subdivisions=2)
+    foliage_clump(m, Vector((1.1, -1.0, 42.2)), (6.0, 5.5, 4.6), palette, seed * 10 + 12, subdivisions=2)
     for k in range(10):   # trepadeiras com flores que brilham pouco
         a = rnd.uniform(0, math.tau); z = rnd.uniform(4, H - 4)
-        m.sphere('flower_violet', 0.5, T(math.cos(a) * 3.2, math.sin(a) * 3.2, z), u=6, v=4)
+        m.ico('flower_violet', 0.5, T(math.cos(a) * 3.2, math.sin(a) * 3.2, z), sub=1)
     return m.done()
 
 def make_dead_tree(name, seed):
@@ -1239,6 +1279,15 @@ def make_obelisk(name):
     return m.done()
 
 # ------------------------------------------------------------------ montagem
+def build_vegetation():
+    """Regenera apenas quatro árvores; não modifica outros modelos nem o arquivo .blend."""
+    global COLL
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    _mats.clear()
+    COLL = bpy.data.collections.new('RACESTARS'); bpy.context.scene.collection.children.link(COLL)
+    return [make_acacia('tree_acacia', 7), make_acacia('tree_acacia_b', 31, 8.0),
+            make_pine('pine', 25), make_giant_tree('tree_giant', 29)]
+
 def build_all():
     global COLL
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -1342,9 +1391,12 @@ def preview():
     for ob in (so, g, co): bpy.data.objects.remove(ob)
 
 if __name__ == '__main__':
-    objs = build_all()
-    export(objs)
-    layout(objs)
-    if '--preview' in ARGS: preview()
-    bpy.ops.wm.save_as_mainfile(filepath=BLEND, compress=True)
-    print('salvo', BLEND)
+    if '--vegetation-only' in ARGS:
+        export(build_vegetation())
+    else:
+        objs = build_all()
+        export(objs)
+        layout(objs)
+        if '--preview' in ARGS: preview()
+        bpy.ops.wm.save_as_mainfile(filepath=BLEND, compress=True)
+        print('salvo', BLEND)

@@ -15,7 +15,7 @@ const RemoteRacer = preload("res://scripts/remote_racer.gd")
 const SAVE_PATH := "user://save.cfg"
 const SAVE_KEY := "race_v6"
 const SUN_AZIMUTH := 35.0
-const SUN_ELEVATION := 42.0
+const SUN_ELEVATION := 32.0
 const HINT := "Esquerda do ecrã: virar   ·   direita: TRAVÃO DE MÃO (travar + virar = derrapar)"
 const HINT_EXPLORE := "Explora à vontade   ·   MAPA: ver o mundo e viajar   ·   travar + virar = derrapar"
 
@@ -278,7 +278,7 @@ func _process(dt: float) -> void:
 	hud.set_race(t_race, best, next_cp, cps.size(), player.speed() * 3.6, _race_label())
 	var cave: bool = map.in_cave(p)
 	# dentro da gruta / sob o teto de pedra a luz ambiente cai (fica mais escuro)
-	env.ambient_light_energy = move_toward(env.ambient_light_energy, 0.28 if cave else 0.7, dt * 1.2)
+	env.ambient_light_energy = move_toward(env.ambient_light_energy, 0.24 if cave else 0.52, dt * 1.2)
 	fx.update(player.running, player.speed(), player.speed_fraction(), cave, player.on_ground)
 	if int(elapsed * 2.0) != int((elapsed - dt) * 2.0):   # zona onde estamos (aviso ao entrar)
 		var z: int = map.zone_at(p)

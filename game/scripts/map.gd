@@ -38,6 +38,7 @@ var terrain: Node
 var props := {}
 var rock_mat: ShaderMaterial
 var rock_mat_dark: ShaderMaterial
+var foliage_mat: ShaderMaterial
 var checkpoints: Array = []      # [{pos, dir, w, node, column}]
 var player: Node3D
 var cave_boxes: Array = []       # [{origin, fwd, len, half_w, top}] túneis e tetos (para o som e a luz)
@@ -61,17 +62,23 @@ func setup(map_info: Dictionary, t: Node) -> void:
 	terrain.apply_biome(rock_mat, info)
 	rock_mat_dark = rock_mat.duplicate()
 	rock_mat_dark.set_shader_parameter("darken", 0.75)
+	foliage_mat = ShaderMaterial.new()
+	foliage_mat.shader = preload("res://shaders/foliage.gdshader")
 	var t0 := Time.get_ticks_msec()
 	_place_props()
 	var t1 := Time.get_ticks_msec()
 	_place_set_pieces()
 	_place_water()
+	_place_ocean()
 	_place_islands()
 	var t2 := Time.get_ticks_msec()
 	_place_cover()
 	_place_banners()
 	_place_herds()
 	_place_colossi()
+	var scenery := preload("res://scripts/island_scenery.gd").new()
+	add_child(scenery)
+	scenery.setup(info, terrain)
 	_place_checkpoints()
 	_place_route_posts()
 	_place_pads()
@@ -111,6 +118,8 @@ func _prop(name: String) -> Dictionary:
 		if m is StandardMaterial3D:
 			(m as StandardMaterial3D).vertex_color_use_as_albedo = true
 			(m as StandardMaterial3D).specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			if name.trim_suffix("_big") in ["tree_acacia", "tree_acacia_b", "tree_giant", "bush", "pine", "palm", "fern"] and not m.emission_enabled:
+				mesh.surface_set_material(i, foliage_mat)
 	props[name] = {"mesh": mesh, "shape": shape, "cyl": c is Array, "h": (c[1] if c is Array else 0.0)}
 	return props[name]
 
@@ -305,9 +314,45 @@ func in_cave(p: Vector3) -> bool:
 	return false
 
 # ------------------------------------------------------------------ água, ilhas, relva, bandeirolas
+func _place_ocean() -> void:
+	if not info.has("ocean"):
+		return
+	var ocean: Dictionary = info.ocean
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/ocean.gdshader")
+	mat.set_shader_parameter("heightmap", terrain.height_texture)
+	mat.set_shader_parameter("sea_mask", load(String(ocean.mask)))
+	mat.set_shader_parameter("map_size", float(info.size))
+	mat.set_shader_parameter("height_cell", float(info.cell))
+	mat.set_shader_parameter("sea_y", float(ocean.y))
+	var mesh := PlaneMesh.new()
+	mesh.size = Vector2.ONE * float(ocean.size)
+	var surface := MeshInstance3D.new()
+	surface.name = "Ocean"
+	surface.mesh = mesh
+	surface.material_override = mat
+	surface.position.y = float(ocean.y)
+	surface.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(surface)
+	# Caixas unidas pelo gerador: só na costa/mar, nunca sob túneis ou abismos.
+	var body := StaticBody3D.new()
+	body.name = "OceanSurface"
+	body.set_meta("water", true)
+	for rect in ocean.get("collision_rects", []):
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(float(rect[2]), 2.0, float(rect[3]))
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		collision.position = Vector3(float(rect[0]), float(ocean.y) - 1.0, float(rect[1]))
+		body.add_child(collision)
+	add_child(body)
+
 func _place_water() -> void:
 	var wmat := ShaderMaterial.new()
 	wmat.shader = preload("res://shaders/water.gdshader")
+	wmat.set_shader_parameter("heightmap", terrain.height_texture)
+	wmat.set_shader_parameter("map_size", float(info.size))
+	wmat.set_shader_parameter("height_cell", float(info.cell))
 	for w in info.waters:
 		var sx := float(w.sx) * 2.0
 		var sz := float(w.sz) * 2.0

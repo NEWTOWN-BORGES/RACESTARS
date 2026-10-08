@@ -19,6 +19,7 @@ var chunks: Array = []                 # [{node, min, lod}]
 var lod_meshes: Array[ArrayMesh] = []
 var material: ShaderMaterial
 var biome_texture: ImageTexture
+var height_texture: ImageTexture
 var focus: Node3D
 var _timer := 0.0
 
@@ -31,6 +32,7 @@ func setup(info: Dictionary) -> void:
 	var raw := FileAccess.get_file_as_bytes("res://assets/map/height.zst").decompress(res * res * 2, FileAccess.COMPRESSION_ZSTD)
 	var himg := Image.create_from_data(res, res, false, Image.FORMAT_RH, raw)
 	var htex := ImageTexture.create_from_image(himg)
+	height_texture = htex
 	himg.convert(Image.FORMAT_RF)
 	heights = himg.get_data().to_float32_array()
 	var bres := int(info.biome_res)
@@ -139,7 +141,7 @@ func _make_collision() -> void:
 	cs.scale = Vector3(cell, cell, cell)
 	body.add_child(cs)
 	body.set_meta("terrain", true)
-	# paredes invisíveis um pouco antes das montanhas da borda
+	# Limite da simulação em alto-mar; a costa é definida pelos dados da ilha.
 	var edge := half - 120.0
 	for n in [Vector3.RIGHT, Vector3.LEFT, Vector3.FORWARD, Vector3.BACK]:
 		var wall := CollisionShape3D.new()
