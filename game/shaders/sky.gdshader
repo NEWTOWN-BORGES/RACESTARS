@@ -3,9 +3,11 @@
 shader_type sky;
 render_mode use_debanding;
 
-uniform vec3 zenith : source_color = vec3(0.12, 0.31, 0.52);
-uniform vec3 mid_sky : source_color = vec3(0.40, 0.62, 0.76);
-uniform vec3 horizon : source_color = vec3(0.72, 0.81, 0.83);
+global uniform float cinematic_detail;
+
+uniform vec3 zenith : source_color = vec3(0.09, 0.23, 0.41);
+uniform vec3 mid_sky : source_color = vec3(0.32, 0.52, 0.69);
+uniform vec3 horizon : source_color = vec3(0.72, 0.78, 0.79);
 uniform vec3 sun_color : source_color = vec3(1.0, 0.78, 0.48);
 uniform vec3 cloud_col : source_color = vec3(0.93, 0.91, 0.82);
 uniform vec3 planet_color : source_color = vec3(0.75, 0.71, 0.80);
@@ -19,7 +21,13 @@ float vnoise(vec2 p) {
 }
 float fbm(vec2 p) {
 	float s = 0.0, a = 0.5;
-	for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+	for (int i = 0; i < 5; i++) {
+		if (i >= 3 && cinematic_detail < 0.5) { break; }
+		if (i >= 4 && cinematic_detail < 0.85) { break; }
+		s += a * vnoise(p);
+		p = mat2(vec2(1.64, 1.19), vec2(-1.19, 1.64)) * p + vec2(3.7, 7.1);
+		a *= 0.5;
+	}
 	return s;
 }
 void sky() {
@@ -52,12 +60,13 @@ void sky() {
 	col = mix(col, planet_color * (0.64 + phase * 0.4 + bands), planet * 0.58);
 	col = mix(col, rings, ring * planet * step(ring_uv.y, 0.0) * 0.4);
 
-	// nuvens altas finas (cirros)
+	// Bancos de nuvens com volumes largos, sem as faixas paralelas dos antigos cirros.
 	if (h > 0.0) {
 		vec2 uv = d.xz / (h + 0.08);
-		float n = fbm(uv * vec2(0.5, 2.2) + vec2(4.0, 1.0));
-		float c = smoothstep(0.48, 0.73, n) * smoothstep(0.02, 0.15, h) * (1.0 - smoothstep(0.5, 0.95, h));
-		col = mix(col, cloud_col + sun_color * pow(cs, 6.0) * 0.15, c * 0.66);
+		float n = fbm(uv * vec2(0.64, 0.84) + vec2(4.0, 1.0));
+		float c = smoothstep(0.43, 0.70, n) * smoothstep(0.02, 0.15, h) * (1.0 - smoothstep(0.5, 0.95, h));
+		vec3 cloud_light = mix(mid_sky * 0.83, cloud_col, smoothstep(0.44, 0.63, n));
+		col = mix(col, cloud_light + sun_color * pow(cs, 6.0) * 0.12, c * 0.78);
 	}
 
 	// Horizonte marinho aberto: o relevo distante vem da ilha real.

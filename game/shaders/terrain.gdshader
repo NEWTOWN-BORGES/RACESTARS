@@ -3,7 +3,7 @@
 // Cores: areia, relva, selva, areia vermelha e calcário conforme o mapa de biomas;
 // rocha em camadas nas encostas; mais escuro debaixo de água e no fundo do abismo.
 shader_type spatial;
-render_mode specular_disabled;
+render_mode diffuse_burley, specular_schlick_ggx;
 #include "res://shaders/rock_common.gdshaderinc"
 
 uniform sampler2D heightmap : filter_nearest, repeat_disable;
@@ -58,20 +58,30 @@ void fragment() {
 	float footprint = max(length(dFdx(p)), length(dFdy(p)));
 	float grain_fade = detail_fade * (1.0 - smoothstep(0.24, 0.75, footprint));
 	float rip = sin(p.x * 0.55 + p.y * 0.25 + n1 * 25.0) * 0.5 + 0.5;
-	sand *= 1.0 - (1.0 - rip) * 0.045 * detail_fade;
-	float grit = r_noise(p * 1.1);
+	sand *= 1.0 - (1.0 - rip) * 0.065 * grain_fade;
+	float grit = 0.5;
+	if (cinematic_detail > 0.5) {
+		grit = r_noise(p * 1.1);
+	}
 	sand *= 1.0 - smoothstep(0.73, 0.92, grit) * 0.06 * grain_fade;
-	vec3 grass = mix(grass_a, grass_b, smoothstep(0.3, 0.7, r_fbm(p * 0.02)));
+	vec3 grass = mix(grass_a, grass_b, smoothstep(0.3, 0.7, n2));
+	if (cinematic_detail > 0.5) {
+		grass = mix(grass_a, grass_b, smoothstep(0.3, 0.7, r_fbm(p * 0.02)));
+	}
 	grass = mix(grass, savanna, clamp(b.b * 2.5, 0.0, 1.0) * step(0.2, b.r));   // savana: relva dourada
 	grass *= 0.93 + 0.09 * (grit - 0.5) * grain_fade;
-	vec3 jung = mix(jungle_a, jungle_b, smoothstep(0.3, 0.7, r_fbm(p * 0.03 + 5.0)));
+	vec3 jung = mix(jungle_a, jungle_b, smoothstep(0.3, 0.7, n1));
+	if (cinematic_detail > 0.5) {
+		jung = mix(jungle_a, jungle_b, smoothstep(0.3, 0.7, r_fbm(p * 0.03 + 5.0)));
+	}
 	jung *= 0.93 + 0.09 * (grit - 0.5) * grain_fade;
-	float slope = 1.0 - wnrm.y;
+	vec3 surface_normal = normalize(wnrm);
+	float slope = 1.0 - surface_normal.y;
 	float flat_k = 1.0 - smoothstep(0.14, 0.32, slope);
 	float gr = clamp(b.r * 1.4 - 0.25 + (n2 - 0.5) * 0.6, 0.0, 1.0) * flat_k;
 	vec3 ground = mix(sand, grass, gr);
 	ground = mix(ground, jung, clamp(b.g * 1.3 - 0.15 + (n1 - 0.5) * 0.5, 0.0, 1.0) * flat_k);
-	vec3 rock = strata(wpos, wnrm, b);
+	vec3 rock = strata(wpos, surface_normal, b);
 	float rk = smoothstep(0.2, 0.42, slope + (n2 - 0.5) * 0.12);
 	vec3 c = mix(ground, rock, rk);
 	// debaixo de água: mais escuro e esverdeado
@@ -92,7 +102,10 @@ void fragment() {
 	c *= mix(0.5, 1.0, smoothstep(-46.0, -24.0, wpos.y));   // fundo do abismo
 	ALBEDO = c;
 	float ground_relief = rip * 0.035 * (1.0 - gr) + grit * 0.02;
-	float relief = mix(ground_relief, rock_relief(wpos, wnrm), rk);
-	NORMAL = relief_normal(VERTEX, NORMAL, relief, grain_fade * 0.4);
-	ROUGHNESS = mix(1.0, 0.74, shoreline);
+	float relief = mix(ground_relief, rock_relief(wpos, surface_normal), rk);
+	float relief_fade = mix(grain_fade, rock_detail_fade(wpos, length(VERTEX)), rk);
+	NORMAL = relief_normal(VERTEX, NORMAL, relief, relief_fade * mix(0.35, 0.72, rk) * mix(1.0, 0.65, shoreline));
+	float dry_roughness = mix(0.97, 0.87, rk) + (n2 - 0.5) * 0.05;
+	ROUGHNESS = mix(dry_roughness, 0.36 + n2 * 0.12, shoreline);
+	SPECULAR = mix(0.22, 0.48, shoreline);
 }

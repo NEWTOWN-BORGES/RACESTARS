@@ -20,6 +20,14 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
 
+## Evolução visual 0.8
+
+Materiais com desgaste, metal escovado, musgo contextual, ondas e espuma costeira,
+nuvens e nevoeiro de transição entre regiões. Os três perfis mantêm orçamentos
+distintos. Os modelos existentes conservam a sua geometria estilizada.
+
+[Comparações reais antes/depois e validação](docs/cinematic-audit.md).
+
 ## Ilha e cenários
 
 - A costa é recortada depois das estradas e serras: baías, penínsulas, praias e oceano navegável.
@@ -57,8 +65,8 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-**Versão 0.7:** inclui a ilha irregular, cenários, câmera com colisão, propulsão
-e perfis gráficos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.7/apk/RACESTARS.apk)
+**Versão 0.8:** refina materiais, água, vegetação, céu e atmosfera por bioma;
+preserva a ilha, os modelos, as pistas e os controlos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.8/apk/RACESTARS.apk)
 (Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
@@ -161,7 +169,7 @@ java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2
 
 ## Instalar no Windows
 
-[Baixar instalador Windows 0.7](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.7/windows/RACESTARS-Setup.exe)
+[Baixar instalador Windows 0.8](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.8/windows/RACESTARS-Setup.exe)
 para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
 desinstalador, sem exigir administrador. O instalador não tem certificado
 comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.

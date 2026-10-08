@@ -53,6 +53,8 @@ func _capture() -> void:
 		race.cam.global_position = view[1]
 		race.cam.look_at(view[2])
 		race.cam.fov = 67.0
+		if race.environment_system.has_method("update_region"):
+			race.environment_system.update_region(view[2], 0.0, false, true)
 		race.terrain.update_now()
 		await process_frame
 		await RenderingServer.frame_post_draw

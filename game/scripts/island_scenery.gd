@@ -78,6 +78,7 @@ func _make_resources() -> void:
 	stone.roughness = 0.92
 	var weathered_stone := ShaderMaterial.new()
 	weathered_stone.shader = preload("res://shaders/island_stone.gdshader")
+	_terrain.apply_biome(weathered_stone, _info)
 	_materials.stone = weathered_stone
 	var metal := stone.duplicate() as StandardMaterial3D
 	metal.metallic = 0.52

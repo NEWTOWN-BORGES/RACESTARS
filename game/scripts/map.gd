@@ -460,6 +460,7 @@ func _colossal_mesh(name: String, cache: Dictionary) -> Mesh:
 	for i in mesh.get_surface_count():
 		var m := ShaderMaterial.new()
 		m.shader = preload("res://shaders/colossal.gdshader")
+		terrain.apply_biome(m, info)
 		_far_fog(m)
 		var src := mesh.surface_get_material(i)
 		if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:

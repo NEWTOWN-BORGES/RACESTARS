@@ -52,12 +52,15 @@ Os testes verificam efeitos de terra/água/ar, travagem, duração do boost,
 colisão da câmera, primeira pessoa, viagem, pausa e limites dos perfis.
 A corrida Reta do Sal terminou em 27,7 s no teste automático. A visualização
 foi conferida no Godot 4.6.3 / OpenGL Compatibility com renderização por
-software. Isso não mede FPS de um telefone. Os pacotes Android/Windows 0.7
+software. Isso não mede FPS de um telefone. Os pacotes Android/Windows 0.8
 foram exportados posteriormente; os links estão no README.
 
-Resultado final: 17 verificações de câmera/efeitos e 18 verificações do
+Resultado final: 17 verificações de câmera/efeitos e 21 verificações do
 sistema visual passaram. Capturas do menu e das duas vistas foram conferidas.
 Na saída do render OpenGL/llvmpipe ainda aparecem avisos de duas texturas
 não libertadas (aproximadamente 43 KiB no total), mesmo após libertar a cena
 antes de encerrar. A origem desse aviso de limpeza não foi isolada; não
 aparecem erros de script ou de compilação de shader nas capturas finais.
+
+A evolução de materiais e atmosfera da versão 0.8 está documentada em
+[cinematic-audit.md](cinematic-audit.md), com capturas comparáveis.

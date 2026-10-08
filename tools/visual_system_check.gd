@@ -22,6 +22,17 @@ func run() -> void:
 		check(env.volumetric_fog_enabled == (forward and profile == "ultra"), "Volumetria incompatível: " + profile)
 		check(visual.reflections.get_child_count() == (0 if profile == "mobile" else 2), "Orçamento de reflexos: " + profile)
 		check(visual.ambient.dust.amount == (16 if profile == "mobile" else (64 if profile == "ultra" else 36)), "Orçamento ambiente: " + profile)
+	# O mesmo mundo deve ter atmosfera distinta sem alterar o estado do veículo.
+	var position_before: Vector3 = race.player.global_position
+	visual.update_region(Vector3(-9216, 100, -9216), 0.0, false, true)
+	var dry: Color = visual.environment.fog_light_color
+	var forest = race.info.zones.filter(func(zone): return zone.biome == "jungle")[0]
+	visual.update_region(Vector3(forest.c[0], 100, forest.c[1]), 0.0, false, true)
+	var wet: Color = visual.environment.fog_light_color
+	check(dry.r > wet.r and dry.b < wet.b, "Atmosfera não distingue deserto/selva")
+	check(race.player.global_position == position_before, "Atmosfera moveu o veículo")
+	visual.update_region(Vector3.ZERO, 0.016, true)
+	check(absf(visual.environment.fog_light_color.r - wet.r) < 0.02, "Transição de bioma brusca")
 	visual.set_quality("mobile")
 	check(not visual.environment.glow_enabled, "Perfil leve mantém bloom")
 	check(visual.get_node("SurfaceWear").get_child_count() == 1, "Desgaste ausente")

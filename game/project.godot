@@ -48,3 +48,10 @@ scene={
 "meshes/ensure_tangents": false,
 "meshes/generate_lods": false
 }
+
+[shader_globals]
+
+cinematic_detail={
+"type": "float",
+"value": 0.65
+}
