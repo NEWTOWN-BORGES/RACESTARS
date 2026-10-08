@@ -318,4 +318,4 @@ mapa. Comparar duração de pulsos a 30 e 60 FPS. Conferir que nenhum efeito
 encobre o centro/HUD e que a câmera não atravessa paredes.
 
 A implementação tem verificação funcional em `tools/speed_fx_check.gd`.
-O APK precisa de uma exportação separada para incluir as alterações.
+Os pacotes da versão 0.7 incluem estas alterações; os links estão no README.

@@ -57,8 +57,9 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-O APK em `apk/` corresponde à versão 0.6. Para jogar com as alterações da ilha e dos cenários,
-é necessário gerar um novo APK a partir deste código (instruções abaixo).
+**Versão 0.7:** inclui a ilha irregular, cenários, câmera com colisão, propulsão
+e perfis gráficos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.7/apk/RACESTARS.apk)
+(Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
 (se pedir, permita "instalar apps de fontes desconhecidas"). Jogue com o telemóvel deitado.
@@ -158,6 +159,23 @@ godot --headless --path game --export-release "Android" ../build/RACESTARS-unsig
 java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2/v3)
 ```
 
+## Instalar no Windows
+
+[Baixar instalador Windows 0.7](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.7/windows/RACESTARS-Setup.exe)
+para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
+desinstalador, sem exigir administrador. O instalador não tem certificado
+comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.
+
+Os pacotes foram gerados com os templates oficiais do Godot 4.6.3, com checksum
+conferido. O APK tem assinatura v2/v3 compatível com a versão 0.6 anterior.
+O instalador Windows foi extraído e seus arquivos conferidos contra o export.
+Não foram testados em um telefone nem em uma instalação nativa do Windows.
+Checksums dos downloads: [SHA256SUMS.txt](SHA256SUMS.txt).
+
+Para repetir os exports, configure Java/SDK Android no Godot, instale os templates
+4.6.3 e NSIS e execute `tools/export_release.sh`. O APK resultante precisa ser
+assinado antes da distribuição. Nenhuma chave privada é guardada no repositório.
+
 ## Testes automáticos (opcional)
 
 ```bash
@@ -192,4 +210,4 @@ A câmera usa colisão, primeira pessoa e FOV progressivo. Poeira, spray, vento,
 propulsão e áudio recebem o mesmo estado do veículo. O menu oferece perfis
 **Leve, Equilibrado e Alto** para iluminação, reflexos e partículas ambientais.
 Detalhes e comandos de verificação: [sistemas visuais](docs/visual-systems.md).
-Estas alterações estão no projeto Godot; o APK 0.6 ainda precisa de nova exportação.
+Estas alterações estão incluídas nos pacotes Android e Windows da versão 0.7.
