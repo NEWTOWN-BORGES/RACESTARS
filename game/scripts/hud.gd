@@ -3,6 +3,7 @@ extends CanvasLayer
 ## seta para o próximo portão, nome da zona, contagem 3-2-1, mensagens, pausa,
 ## ecrã do MAPA (mundo inteiro; na exploração toca-se para viajar) e resultados do PvP.
 
+signal recover_pressed
 signal camera_pressed
 signal pause_action(action: String)   # "portao", "recomecar", "menu"
 signal travel_requested(world: Vector2)
@@ -95,9 +96,10 @@ func _ready() -> void:
 	var bar := HBoxContainer.new()
 	bar.anchor_left = 1.0
 	bar.anchor_right = 1.0
-	bar.position = Vector2(-390, 62)
+	bar.position = Vector2(-570, 62)
 	bar.add_theme_constant_override("separation", 12)
 	root.add_child(bar)
+	bar.add_child(_button("RECUPERAR", func(): recover_pressed.emit()))
 	bar.add_child(_button("CÂMARA", func(): camera_pressed.emit()))
 	bar.add_child(_button("MAPA", func(): open_map()))
 	bar.add_child(_button("II", func(): _toggle_pause()))

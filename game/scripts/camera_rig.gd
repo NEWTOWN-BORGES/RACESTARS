@@ -32,6 +32,11 @@ var _roll := 0.0
 var _shake := 0.0
 var _kick := 0.0
 var _t := 0.0
+var _follow_position := Vector3.ZERO
+var _suspension := 0.0
+var _suspension_velocity := 0.0
+var _last_velocity := Vector3.ZERO
+var _was_grounded := false
 
 func _ready() -> void:
 	# Player (0) -> Race/amostra (10) -> pivôs (20) -> braço interno (30).
@@ -67,11 +72,16 @@ func snap() -> void:
 	_snap_state.capture(player, false)
 	_state = _snap_state
 	_yaw = _state.heading
-	_pitch = _target_pitch(_state.pitch)
+	_pitch = _target_pitch(_state)
 	_roll = 0.0
 	_shake = 0.0
 	_kick = 0.0
 	_t = 0.0
+	_suspension = 0.0
+	_suspension_velocity = 0.0
+	_last_velocity = _state.velocity
+	_was_grounded = _state.on_ground
+	_follow_position = _state.position + Vector3.UP * FOLLOW_HEIGHT
 	transform = Transform3D.IDENTITY
 	follow.transform = Transform3D.IDENTITY
 	rotation_pivot.transform = Transform3D.IDENTITY
@@ -84,7 +94,7 @@ func snap() -> void:
 		arm.spring_length = 0.0
 		_apply_cockpit()
 	else:
-		follow.global_position = _state.position + Vector3.UP * FOLLOW_HEIGHT
+		follow.global_position = _follow_position
 		rotation_pivot.rotation = Vector3(_pitch, _yaw, 0.0)
 		arm.spring_length = lerpf(19.0, 17.0, _state.speed_ratio)
 	camera.fov = _target_fov(_state)
@@ -107,15 +117,17 @@ func _physics_process(dt: float) -> void:
 	_t += dt
 	_shake = move_toward(_shake, 0.0, 1.8 * dt)
 	_kick = move_toward(_kick, 0.0, 2.5 * dt)
+	_update_suspension(dt)
 	if first_person:
 		_apply_cockpit()
 	else:
-		follow.global_position = follow.global_position.lerp(
+		_follow_position = _follow_position.lerp(
 			_state.position + Vector3.UP * FOLLOW_HEIGHT, 1.0 - exp(-10.0 * dt))
+		# O balanço move a âncora, nunca a câmera para fora da colisão do braço.
+		follow.global_position = _follow_position + Vector3.UP * _suspension * shake_intensity
 		_yaw = lerp_angle(_yaw, _state.heading, 1.0 - exp(-5.0 * dt))
-		_pitch = lerpf(_pitch, _target_pitch(_state.pitch), 1.0 - exp(-4.0 * dt))
-		var roll_target := _state.steering * deg_to_rad(3.0)
-		roll_target *= 1.0 if _state.on_ground else 0.4
+		_pitch = lerpf(_pitch, _target_pitch(_state), 1.0 - exp(-4.5 * dt))
+		var roll_target := _target_roll(_state)
 		_roll = lerpf(_roll, roll_target, 1.0 - exp(-6.0 * dt))
 		rotation_pivot.rotation = Vector3(_pitch, _yaw, _roll)
 		arm.spring_length = lerpf(arm.spring_length,
@@ -123,9 +135,38 @@ func _physics_process(dt: float) -> void:
 	camera.fov = lerpf(camera.fov, _target_fov(_state), 1.0 - exp(-5.0 * dt))
 	_apply_shake()
 
-func _target_pitch(visual_pitch: float) -> float:
-	return clampf(deg_to_rad(-6.0) + visual_pitch * 0.6,
-		deg_to_rad(-25.0), deg_to_rad(25.0))
+func _target_pitch(state: FXState) -> float:
+	var pitch := state.pitch * 0.65
+	if not state.on_ground:
+		# Antecipar a trajetória ajuda a ler a zona de aterragem sem perder o horizonte.
+		var horizontal := Vector2(state.velocity.x, state.velocity.z).length()
+		pitch = state.pitch * 0.45 + atan2(state.velocity.y, maxf(horizontal, 12.0)) * 0.18
+	return clampf(deg_to_rad(-6.0) + pitch, deg_to_rad(-28.0), deg_to_rad(25.0))
+
+func _target_roll(state: FXState) -> float:
+	var bank := state.steering * deg_to_rad(3.0)
+	if state.on_ground and state.ground_valid:
+		var normal := Basis(Vector3.UP, -state.heading) * state.ground_normal
+		bank -= atan2(normal.x, maxf(normal.y, 0.2)) * 0.16
+	else:
+		bank *= 0.4
+	return clampf(bank, deg_to_rad(-5.0), deg_to_rad(5.0)) * shake_intensity
+
+func _update_suspension(dt: float) -> void:
+	if _state.on_ground and not _was_grounded:
+		var impact := maxf(0.0, -_last_velocity.dot(_state.ground_normal))
+		_suspension_velocity -= minf(impact * 0.22, 4.5)
+	elif not _state.on_ground and _was_grounded:
+		_suspension_velocity += clampf(_state.velocity.y * 0.08, 0.0, 1.1)
+	_was_grounded = _state.on_ground
+	_last_velocity = _state.velocity
+	# Solução exata da mola criticamente amortecida: mesma resposta a 30/60/120 Hz.
+	var omega := 10.0
+	var decay := exp(-omega * dt)
+	var c := _suspension_velocity + omega * _suspension
+	_suspension = (_suspension + c * dt) * decay
+	_suspension_velocity = (_suspension_velocity - omega * c * dt) * decay
+	_suspension = clampf(_suspension, -0.25, 0.12)
 
 func _target_fov(state: FXState) -> float:
 	var curve := pow(clampf(state.speed_ratio, 0.0, 1.0), 2.4)

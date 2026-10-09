@@ -11,6 +11,7 @@ signal pad_hit
 
 const CELL_GROUP := 1024.0       # peças agrupadas em quadrados de 1 km (um MultiMesh por tipo)
 const COVER_GROUP := 256.0       # relva/flores em quadrados mais pequenos (vêem-se só de perto)
+const WATER_SUPPORT_LAYER := 2  # suspensão vê a água; o casco nunca colide com ela
 const ROCK_PROPS := ["rock_spire_a", "rock_spire_b", "rock_spire_c", "boulder_a", "boulder_b", "mesa", "arch",
 	"arch_giant", "arch_twin", "rock_ring", "rock_fin", "butte", "canyon_roof"]
 # forma de colisão de cada peça: convexa, malha exata, ou cilindro [raio, altura] (troncos, colunas)
@@ -348,6 +349,20 @@ func in_cave(p: Vector3) -> bool:
 	return false
 
 # ------------------------------------------------------------------ água, ilhas, relva, bandeirolas
+## Só a superfície serve de apoio à suspensão. Uma caixa acrescentava paredes nas
+## margens e nas juntas do oceano, onde a nave podia bater ou ficar presa.
+func _water_support_shape(size: Vector2) -> ConcavePolygonShape3D:
+	var plane := PlaneMesh.new()
+	plane.size = size
+	return plane.create_trimesh_shape()
+
+func _water_body() -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.collision_layer = WATER_SUPPORT_LAYER
+	body.collision_mask = 0
+	body.set_meta("water", true)
+	return body
+
 func _place_ocean() -> void:
 	if not info.has("ocean"):
 		return
@@ -368,16 +383,13 @@ func _place_ocean() -> void:
 	surface.position.y = float(ocean.y)
 	surface.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(surface)
-	# Caixas unidas pelo gerador: só na costa/mar, nunca sob túneis ou abismos.
-	var body := StaticBody3D.new()
+	# Retângulos unidos pelo gerador: só na costa/mar, nunca sob túneis ou abismos.
+	var body := _water_body()
 	body.name = "OceanSurface"
-	body.set_meta("water", true)
 	for rect in ocean.get("collision_rects", []):
-		var shape := BoxShape3D.new()
-		shape.size = Vector3(float(rect[2]), 2.0, float(rect[3]))
 		var collision := CollisionShape3D.new()
-		collision.shape = shape
-		collision.position = Vector3(float(rect[0]), float(ocean.y) - 1.0, float(rect[1]))
+		collision.shape = _water_support_shape(Vector2(float(rect[2]), float(rect[3])))
+		collision.position = Vector3(float(rect[0]), float(ocean.y), float(rect[1]))
 		body.add_child(collision)
 	add_child(body)
 
@@ -402,15 +414,10 @@ func _place_water() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.visibility_range_end = 6000.0
 		add_child(mi)
-		# superfície "dura": o veículo flutua sobre a água
-		var body := StaticBody3D.new()
-		body.set_meta("water", true)
+		var body := _water_body()
 		body.transform = xf
 		var cs := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(sx, 2.0, sz)
-		cs.shape = box
-		cs.position = Vector3(0, -1.0, 0)
+		cs.shape = _water_support_shape(Vector2(sx, sz))
 		body.add_child(cs)
 		add_child(body)
 

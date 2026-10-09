@@ -11,6 +11,7 @@ extends Node3D
 
 enum State { WAIT, COUNTDOWN, RACE, FINISHED, FREE }
 
+const SafeRespawn = preload("res://scripts/safe_respawn.gd")
 const RemoteRacer = preload("res://scripts/remote_racer.gd")
 const SAVE_PATH := "user://save.cfg"
 const SAVE_KEY := "race_v6"
@@ -91,6 +92,7 @@ func _ready() -> void:
 	hud.map_size = float(info.size)
 	hud.player = player
 	hud.multiplayer_mode = mp
+	hud.recover_pressed.connect(_recover_request)
 	hud.camera_pressed.connect(func(): camera_rig.toggle())
 	hud.pause_action.connect(_on_pause_action)
 	hud.travel_requested.connect(_travel)
@@ -224,7 +226,7 @@ func _build_route() -> Array:
 	return out
 
 func _setup_input() -> void:
-	var binds := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D], "brake": [KEY_DOWN, KEY_S, KEY_SPACE]}
+	var binds := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D], "brake": [KEY_DOWN, KEY_S, KEY_SPACE], "recover": [KEY_R]}
 	for action in binds:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.2)
@@ -245,6 +247,8 @@ func _parse_args() -> Dictionary:
 	return out
 
 func _physics_process(dt: float) -> void:
+	if Input.is_action_just_pressed("recover"):
+		_recover_request()
 	fx_state.capture(player, map.in_cave(player.global_position))
 	camera_rig.update_state(fx_state, dt)
 
@@ -510,46 +514,63 @@ func _on_fall() -> void:
 	hud.set_center("CAIU!", "De volta ao caminho...")
 	respawn_timer = 1.2
 
+func _recover_request() -> void:
+	if state in [State.RACE, State.FREE] and respawn_timer < 0.0:
+		respawn()
+
 ## Guarda onde o veículo esteve bem assente no chão (para renascer perto, depois de cair).
 func _track_safe(dt: float) -> void:
 	_safe_t -= dt
 	if _safe_t > 0.0:
 		return
 	_safe_t = 0.5
-	var p: Vector3 = player.global_position
-	if player.running and player.on_ground and not player.on_water and p.y > float(info.fall_y) + 20.0:
-		_safe.append([p, player.heading])
-		if _safe.size() > 12:
+	if not player.running or not player.on_ground or player.speed() < 12.0 or _stuck_t > 1.0:
+		return
+	var floor_pos: Vector3 = player.ground_point
+	var direction := Vector2(-sin(player.heading), -cos(player.heading))
+	var safe := SafeRespawn.candidate(get_world_3d().direct_space_state, floor_pos, direction, [player.get_rid()])
+	if not safe.is_empty():
+		_safe.append([safe.position, player.heading])
+		if _safe.size() > 16:
 			_safe.pop_front()
 
-## Renasce no caminho mais perto de onde se esteve há uns 3 segundos (ou no último portão).
+## Histórico confirmado, depois último portão: nunca avançar portões ao recuperar.
 func respawn(at_gate := false) -> void:
-	var pos: Vector3
-	var dir: Vector2
-	if not at_gate and not _safe.is_empty():
-		var s: Array = _safe[maxi(0, _safe.size() - 7)]
-		var sp: Array = map.nearest_spawn(s[0])
-		if not sp.is_empty() and sp[0].distance_to(s[0]) < 300.0:
-			pos = sp[0]
-			dir = sp[1]
-		else:
-			pos = s[0]
-			dir = Vector2(-sin(s[1]), -cos(s[1]))
-	else:
-		var g: Dictionary = ev.start if next_cp == 0 or explore else cps[next_cp - 1]
-		pos = Vector3(g.p[0], 0.0, g.p[2])
-		pos.y = terrain.height_at(pos.x, pos.z)
-		if ev.id == "titan":
-			pos.y = float(g.p[1])
-		dir = Vector2(g.dir[0], g.dir[1])
+	var candidates: Array = []
+	if not at_gate:
+		# Recuar pelo menos dois segundos; não renascer no obstáculo atual.
+		for i in range(maxi(0, _safe.size() - 5), -1, -1):
+			if i < _safe.size():
+				var point: Array = _safe[i]
+				candidates.append([point[0], Vector2(-sin(point[1]), -cos(point[1]))])
+	for gate_index in range(next_cp - 1 if not explore else -1, -2, -1):
+		var gate: Dictionary = cps[gate_index] if gate_index >= 0 else ev.start
+		var position := Vector3(gate.p[0], gate.p[1], gate.p[2])
+		var direction := Vector2(gate.dir[0], gate.dir[1]).normalized()
+		for back: float in [0.0, 12.0, 24.0]:
+			candidates.append([position - Vector3(direction.x, 0, direction.y) * back, direction])
+	var safe := {}
+	for point: Array in candidates:
+		safe = SafeRespawn.candidate(get_world_3d().direct_space_state, point[0], point[1], [player.get_rid()])
+		if not safe.is_empty():
+			break
+	if safe.is_empty():
+		hud.set_center("SEM ESPAÇO LIVRE", "Tenta voltar ao portão pelo menu de pausa.")
+		_hint_t = 3.0
+		respawn_timer = -1.0
+		player.running = true
+		return
 	_safe.clear()
-	player.place(pos, dir, 30.0)
+	player.place(safe.position, safe.direction, 12.0)
 	player.running = true
 	respawn_timer = -1.0
+	_stuck_t = 0.0
+	_stuck_p = player.global_position
 	camera_rig.snap()
 	fx.reset()
 	audio.start_run()
-	hud.set_center("")
+	hud.set_center("", "NAVE RECUPERADA")
+	_hint_t = 1.5
 
 ## Exploração: viajar para o caminho mais perto do sítio tocado no mapa.
 func _travel(w: Vector2) -> void:
@@ -598,21 +619,20 @@ func _on_boost(amount: float) -> void:
 var _stuck_t := 0.0
 var _stuck_p := Vector3.ZERO
 func _check_stuck(dt: float) -> void:
-	if not player.autopilot or not player.running:
-		return
-	_stuck_t += dt
-	if _stuck_t > 4.0:
-		if player.global_position.distance_to(_stuck_p) < 15.0:
-			print("PRESO em ", player.global_position)
-			var r: Array = player.route
-			var i := mini(player._route_i + 30, r.size() - 2)
-			var a: Array = r[i]
-			var b: Array = r[i + 1]
-			player.place(Vector3(a[0], a[1], a[2]), Vector2(b[0] - a[0], b[2] - a[2]).normalized(), 30.0)
-			camera_rig.snap()
-			fx.reset()
+	if not player.running or player.braking or respawn_timer >= 0.0:
 		_stuck_t = 0.0
 		_stuck_p = player.global_position
+		return
+	# Progresso no mundo, não velocidade declarada: colisões podem impedir a nave
+	# de mover mesmo com uma velocidade alta. Só após seis segundos sem avançar.
+	if player.global_position.distance_to(_stuck_p) > 9.0:
+		_stuck_t = 0.0
+		_stuck_p = player.global_position
+	else:
+		_stuck_t += dt
+		if _stuck_t >= 6.0:
+			respawn()
+			_stuck_t = 0.0
 
 func _adapt_quality(dt: float) -> void:
 	if args.has("autoplay"):

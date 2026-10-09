@@ -27,8 +27,9 @@ const PAD_PUSH := 18.0          # m/s que uma placa de aceleração dá
 const SPEED_CAP := 160.0        # nunca passa disto (576 km/h), nem com placas e descidas
 const HOVER := 1.1
 const SPRING := 70.0
-const DAMP := 10.0
+const DAMP := 16.75           # amortecimento quase crítico: aterra sem saltitar
 const GRAVITY := 24.0
+const SUPPORT_MIN_Y := 0.64    # até ~50 graus; paredes nunca sustentam a nave
 const WATER_SPEED := 0.8        # na água anda mais devagar
 const SOLID_MASK := 1           # camada 1: paredes, rochas altas, troncos, túneis, pontes
 const RIDE_MASK := 3            # o raio do chão também vê a camada 2 (pedras baixas: passa-se por cima)
@@ -66,6 +67,9 @@ var _roll := 0.0
 var _roll_v := 0.0
 var _heave := 0.0
 var _heave_v := 0.0
+var _hulls: Array[CollisionShape3D] = []
+var _hull_rest: Array[Transform3D] = []
+var _hull_tilt := Basis.IDENTITY
 var _ground_pitch := 0.0         # inclinação do chão entre a frente e a traseira
 
 @onready var model: Node3D = $Model
@@ -74,7 +78,11 @@ func _ready() -> void:
 	preload("res://scripts/model_materials.gd").apply_vehicle(model)
 	motion_mode = MOTION_MODE_FLOATING
 	collision_mask = SOLID_MASK
-	wall_min_slide_angle = deg_to_rad(10.0)
+	wall_min_slide_angle = 0.0
+	for child in get_children():
+		if child is CollisionShape3D:
+			_hulls.append(child)
+			_hull_rest.append(child.transform)
 
 func speed() -> float:
 	return Vector2(vel.x, vel.z).length()
@@ -92,6 +100,13 @@ func place(pos: Vector3, dir: Vector2, start_speed: float) -> void:
 	global_position = pos + Vector3(0, HOVER + 0.5, 0)
 	heading = atan2(-dir.x, -dir.y)
 	vel = forward() * start_speed
+	velocity = vel
+	_touches.clear()
+	braking = false
+	steer_target = 0.0
+	_hull_tilt = Basis.IDENTITY
+	for i in _hulls.size():
+		_hulls[i].transform = _hull_rest[i]
 	rotation = Vector3(0.0, heading, 0.0)
 	ground_normal = Vector3.UP
 	ground_valid = false
@@ -147,14 +162,10 @@ func _physics_process(dt: float) -> void:
 		_read_input()
 	steer = move_toward(steer, steer_target, dt * 5.0)
 	var space := get_world_3d().direct_space_state
-	# chão (ou água): raio para baixo
-	var from := global_position + Vector3(0, 3.0, 0)
-	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, -14.0, 0))
-	q.exclude = [get_rid()]
-	q.collision_mask = RIDE_MASK
-	var hit := space.intersect_ray(q)
-	# Uma face quase vertical não serve de apoio à suspensão.
-	ground_valid = not hit.is_empty() and hit.normal.y > 0.6
+	# Apoio central define contacto. Normais das extremidades antecipam mudanças
+	# suaves de declive sem apoiar a nave através de buracos ou em tetos.
+	var hit := _support_probe(space, global_position, 3.0)
+	ground_valid = not hit.is_empty()
 	var ground_y := -INF
 	var support_normal := Vector3.UP
 	on_water = false
@@ -162,21 +173,27 @@ func _physics_process(dt: float) -> void:
 		ground_point = hit.position
 		ground_y = hit.position.y
 		support_normal = hit.normal
-		ground_normal = ground_normal.lerp(hit.normal, 1.0 - exp(-17.26 * dt)).normalized()
 		on_water = hit.collider != null and hit.collider.has_meta("water")
-		# inclinação do chão: altura 6 m à frente e 6 m atrás (o corpo acompanha subidas e descidas)
-		var f6 := forward() * 6.0
-		var hf := _probe(space, global_position + f6)
-		var hb := _probe(space, global_position - f6)
-		if hf > -INF and hb > -INF:
-			_ground_pitch = atan2(hf - hb, 12.0)
+		var sum_normal: Vector3 = support_normal * 2.0
+		for offset: float in [-4.0, 4.0]:
+			var sample_pos := global_position + forward() * offset
+			var end_hit := _support_probe(space, sample_pos, 6.0)
+			if end_hit.is_empty():
+				continue
+			# Um andar por cima ou abaixo não pertence à mesma superfície.
+			var expected_y: float = ground_y - support_normal.dot(sample_pos - global_position) / support_normal.y
+			if absf(end_hit.position.y - expected_y) < 2.0:
+				sum_normal += end_hit.normal
+		support_normal = sum_normal.normalized()
+		ground_normal = ground_normal.lerp(support_normal, 1.0 - exp(-18.0 * dt)).normalized()
+		_ground_pitch = atan2(-support_normal.dot(forward()), support_normal.y)
 	var err := (ground_y + HOVER) - global_position.y
 	if running:
 		var v := speed()
 		var vh := Vector3(vel.x, 0.0, vel.z)
 		slip = 0.0 if v < 5.0 else forward().signed_angle_to(vh, Vector3.UP)
 		var hb_turning := braking and absf(steer) > 0.1
-		var turn := steer * turn_rate(v) * (1.0 if on_ground else 0.55)
+		var turn := steer * turn_rate(v) * (1.0 if on_ground else 0.25)
 		if hb_turning:
 			turn *= HB_TURN
 		heading += turn * dt
@@ -195,7 +212,7 @@ func _physics_process(dt: float) -> void:
 			along = move_toward(along, top, ACCEL * 0.25 * dt)
 		along = minf(along, SPEED_CAP)
 		# travão de mão: a traseira solta-se e a velocidade continua para onde ia (derrapagem)
-		var grip := (HB_GRIP if braking else GRIP) * (1.0 if on_ground else 0.3)
+		var grip := (HB_GRIP if braking else GRIP) * (1.0 if on_ground else 0.08)
 		side *= exp(-grip * dt)
 		# a velocidade lateral que se perde vira velocidade para a frente (derrapar não "trava"),
 		# mas nunca mais do que a velocidade com que se entrou (virar não pode dar velocidade)
@@ -222,11 +239,21 @@ func _physics_process(dt: float) -> void:
 	elif on_ground:
 		vel.x *= exp(-1.2 * dt)
 		vel.z *= exp(-1.2 * dt)
+	# A gravidade tira energia numa subida e devolve-a numa descida; propulsão
+	# compensa gradualmente. Não converte uma queda vertical em avanço gratuito.
+	if running and on_ground and ground_valid and not on_water:
+		var gravity_tangent := Vector3.DOWN.slide(support_normal) * GRAVITY
+		vel.x += gravity_tangent.x * dt
+		vel.z += gravity_tangent.z * dt
+		var horizontal_speed := speed()
+		if horizontal_speed > SPEED_CAP:
+			vel.x *= SPEED_CAP / horizontal_speed
+			vel.z *= SPEED_CAP / horizontal_speed
 	# Suspensão amortecida em relação ao declive: subir uma rampa não comprime
 	# a mola como se fosse uma aterragem. A integração implícita é estável com dt maior.
 	var was_air := not on_ground
-	var vy_before := vel.y
-	if ground_valid and err > -0.9:
+	var landing_speed := maxf(0.0, -vel.dot(support_normal))
+	if ground_valid and err > -0.9 and err < 3.0:
 		var ground_vy := -(support_normal.x * vel.x + support_normal.z * vel.z) / support_normal.y
 		var relative_vy := vel.y - ground_vy
 		vel.y = ground_vy + (relative_vy + err * SPRING * dt) / (1.0 + DAMP * dt + SPRING * dt * dt)
@@ -234,13 +261,28 @@ func _physics_process(dt: float) -> void:
 	else:
 		vel.y -= GRAVITY * dt
 		on_ground = false
-	if on_ground and was_air and _air_time > 0.35 and vy_before < -8.0:
-		landed.emit(-vy_before)
+	if on_ground and was_air and _air_time > 0.35 and landing_speed > 8.0:
+		landed.emit(landing_speed)
 	if on_ground and was_air:   # a suspensão encolhe na aterragem e o nariz bate
-		_heave_v -= clampf(-vy_before * 0.12, 0.0, 6.0)
-		_pitch_v -= clampf(-vy_before * 0.02, 0.0, 1.2)
+		_heave_v -= clampf(landing_speed * 0.12, 0.0, 6.0)
+		_pitch_v -= clampf(landing_speed * 0.02, 0.0, 1.2)
+	# Água só é apoio: impedir atravessar a superfície numa queda rápida, sem
+	# laterais sólidas nem teletransporte ao aproximar a margem.
+	if on_water and ground_valid and vel.y < 0.0 and global_position.y >= ground_y:
+		vel.y = maxf(vel.y, (ground_y + 0.15 - global_position.y) / dt)
 	_air_time = 0.0 if on_ground else _air_time + dt
 	rotation = Vector3(0.0, heading, 0.0)
+	# A caixa física acompanha a superfície, independentemente da animação.
+	# Uma caixa sempre horizontal enterrava o nariz nas rampas inclinadas.
+	var approach_surface := ground_valid and err > -5.0 and vel.dot(support_normal) < 2.0
+	var align_surface := on_ground or approach_surface
+	var local_up := Basis(Vector3.UP, -heading) * support_normal if align_surface else Vector3.UP
+	var tilt_pitch := atan2(-support_normal.dot(forward()), support_normal.y) if align_surface else clampf(atan2(vel.y, maxf(speed(), 12.0)), -0.22, 0.22)
+	var tilt_roll := -atan2(local_up.x, local_up.y) if align_surface else 0.0
+	var tilt_target := Basis.from_euler(Vector3(clampf(tilt_pitch, -0.85, 0.85), 0, clampf(tilt_roll, -0.65, 0.65)))
+	_hull_tilt = _hull_tilt.slerp(tilt_target, 1.0 - exp(-18.0 * dt))
+	for i in _hulls.size():
+		_hulls[i].transform = Transform3D(_hull_tilt, Vector3.ZERO) * _hull_rest[i]
 	var before := vel
 	velocity = vel
 	move_and_slide()
@@ -263,8 +305,12 @@ func _physics_process(dt: float) -> void:
 		for i in get_slide_collision_count():
 			var c := get_slide_collision(i)
 			var n := c.get_normal()
-			if absf(n.y) > 0.6:
+			if n.y > SUPPORT_MIN_Y:
 				touched_support = true
+				continue
+			if n.y < -SUPPORT_MIN_Y:
+				touched_support = true
+				vel.y = minf(vel.y, 0.0)
 				continue
 			var hn := Vector3(n.x, 0.0, n.z).normalized()
 			var impact := maxf(-wall_velocity.dot(hn), 0.0)
@@ -287,12 +333,18 @@ func _physics_process(dt: float) -> void:
 			scraped.emit(worst)
 	_update_visual(dt)
 
-func _probe(space: PhysicsDirectSpaceState3D, p: Vector3) -> float:
-	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 6.0, 0), p + Vector3(0, -16.0, 0))
+func _support_probe(space: PhysicsDirectSpaceState3D, p: Vector3, rise: float) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * rise, p + Vector3.DOWN * 14.0)
 	q.exclude = [get_rid()]
 	q.collision_mask = RIDE_MASK
-	var h := space.intersect_ray(q)
-	return h.position.y if not h.is_empty() else -INF
+	var hit := space.intersect_ray(q)
+	# Se o raio começou acima de um teto, procurar de novo a partir da nave.
+	if not hit.is_empty() and hit.position.y > global_position.y + 1.5:
+		q.from = p
+		hit = space.intersect_ray(q)
+	if hit.is_empty() or hit.normal.y < SUPPORT_MIN_Y:
+		return {}
+	return hit
 
 func _update_visual(dt: float) -> void:
 	# o corpo do veículo é animado com molas (o corpo físico só gira em Y com o rumo):
@@ -304,25 +356,30 @@ func _update_visual(dt: float) -> void:
 	var hspeed := Vector2(vel.x, vel.z).length()
 	var tp: float
 	if on_ground:
-		tp = _ground_pitch * 1.15
+		tp = _ground_pitch
 	else:
 		tp = atan2(vel.y, maxf(hspeed, 12.0)) * 0.9
 	if braking and running:
-		tp += 0.06                      # nariz levanta ao travar
+		tp -= 0.045                     # transferência de carga para o nariz
 	tp = clampf(tp, -0.75, 0.75)
-	_pitch_v += ((tp - visual_pitch) * 70.0 - _pitch_v * 10.0) * dt
+	_pitch_v = (_pitch_v + (tp - visual_pitch) * 90.0 * dt) / (1.0 + 15.0 * dt + 90.0 * dt * dt)
 	visual_pitch += _pitch_v * dt
 	var lup := (Basis(Vector3.UP, -heading) * ground_normal).normalized() if on_ground else Vector3.UP
 	var tr := steer_visual * 0.4 - atan2(lup.x, lup.y)
-	_roll_v += ((tr - _roll) * 55.0 - _roll_v * 9.0) * dt
+	_roll_v = (_roll_v + (tr - _roll) * 55.0 * dt) / (1.0 + 12.0 * dt + 55.0 * dt * dt)
 	_roll += _roll_v * dt
-	_heave_v += (-_heave * 90.0 - _heave_v * 9.0) * dt
+	_heave_v = (_heave_v - _heave * 90.0 * dt) / (1.0 + 14.0 * dt + 90.0 * dt * dt)
 	_heave = clampf(_heave + _heave_v * dt, -1.2, 0.8)
 	model.basis = (Basis(Vector3.RIGHT, visual_pitch) * Basis(Vector3.BACK, _roll)).orthonormalized()
 	var bob := sin(_t * 9.0) * 0.05 + sin(_t * 23.0) * 0.02 * speed_fraction() if on_ground else sin(_t * 4.0) * 0.08
 	model.position = model.basis * MODEL_OFFSET + Vector3(0.0, _heave + bob, 0.0)
 
 # ------------------------------------------------------------------ entrada
+func _input(e: InputEvent) -> void:
+	# Soltar sobre um botão HUD também termina o comando iniciado na pista.
+	if e is InputEventScreenTouch and not e.pressed:
+		_touches.erase(e.index)
+
 func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:

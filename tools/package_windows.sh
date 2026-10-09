@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-app_version="${1:-0.10}"
+app_version="${1:-0.11}"
 payload_dir="$repo_dir/build/release/windows"
 output_file="$repo_dir/build/release/RACESTARS-$app_version-Windows-Setup.exe"
 

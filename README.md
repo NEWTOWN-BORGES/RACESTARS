@@ -20,7 +20,17 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
 
-## Perfil Samsung A15 / Estável — 0.10
+## Física e recuperação — 0.11
+
+A nave acompanha subidas e descidas, inclina o casco nas rampas e mantém inércia
+nos saltos. As margens da água deixam de ter paredes invisíveis e as aterragens
+recebem amortecimento. A câmera acompanha os declives e balança suavemente.
+
+**RECUPERAR** no ecrã ou **R** no PC devolve a nave a uma superfície segura sem
+reiniciar a corrida. A recuperação também atua após seis segundos sem avançar;
+manter o travão pressionado desativa essa deteção. [Detalhes e testes](docs/physics-011.md).
+
+## Perfil Samsung A15 / Estável — mantido na 0.11
 
 No seletor de gráficos do menu, escolha **Gráficos: A15 (30 FPS)**. O jogo reconhece
 as famílias SM-A155 (4G) e SM-A156 (5G), ativando o perfil na primeira atualização
@@ -100,8 +110,8 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-**Versão 0.10:** acrescenta o perfil **Gráficos: A15 (30 FPS)**, além de Leve,
-Equilibrado e Alto. Conserva o conteúdo da 0.9 e prioriza estabilidade em aparelhos modestos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.10/apk/RACESTARS.apk)
+**Versão 0.11:** corrige colisões da água, melhora a suspensão, encostas, saltos e câmera.
+Mantém **Gráficos: A15 (30 FPS)**, Leve, Equilibrado e Alto. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.11/apk/RACESTARS.apk)
 (Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
@@ -204,7 +214,7 @@ java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2
 
 ## Instalar no Windows
 
-[Baixar instalador Windows 0.10](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.10/windows/RACESTARS-Setup.exe)
+[Baixar instalador Windows 0.11](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.11/windows/RACESTARS-Setup.exe)
 para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
 desinstalador, sem exigir administrador. O instalador não tem certificado
 comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.

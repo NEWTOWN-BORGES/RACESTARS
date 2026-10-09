@@ -2,6 +2,7 @@ extends RefCounted
 ## Uma amostra do veículo para câmera, partículas e áudio. Unidades: metros e segundos.
 
 var position := Vector3.ZERO
+var velocity := Vector3.ZERO
 var heading := 0.0
 var pitch := 0.0
 var running := false
@@ -21,6 +22,7 @@ var in_tunnel := false
 
 func capture(player: Node3D, cave: bool) -> void:
 	position = player.global_position
+	velocity = player.vel
 	heading = player.heading
 	pitch = player.visual_pitch
 	running = player.running

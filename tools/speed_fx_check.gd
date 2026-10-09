@@ -99,6 +99,30 @@ func run() -> void:
 	player.global_position = Vector3(1000, 0, 1000)
 	rig.snap()
 	check(rig.camera.global_position.distance_to(player.global_position) < 25.0, "Viagem interpola posição anterior")
+	rig.set_physics_process(false)
+	state.on_ground = true
+	state.pitch = deg_to_rad(30)
+	check(rig._target_pitch(state) > 0.15, "Câmera não acompanha subida")
+	state.pitch = deg_to_rad(-30)
+	check(rig._target_pitch(state) < -0.3, "Câmera não acompanha descida")
+	state.ground_valid = true
+	state.ground_normal = Vector3(0.5, 0.866, 0)
+	state.steering = 1.0
+	check(absf(rig._target_roll(state)) <= deg_to_rad(5.01), "Bank excessivo da câmera")
+	state.ground_normal = Vector3.UP
+	var displacements := []
+	for hz in [30, 60, 120]:
+		rig._suspension = 0.0
+		rig._suspension_velocity = 0.0
+		rig._was_grounded = false
+		rig._last_velocity = Vector3(0, -30, -80)
+		rig.update_state(state, 0.0)
+		for i in hz / 5:
+			rig._update_suspension(1.0 / hz)
+		displacements.append(rig._suspension)
+	check(displacements[0] < -0.05 and absf(displacements[0] - displacements[2]) < 0.001, "Suspensão da câmera deve sentir impacto e ser independente do FPS")
+	rig.snap()
+	check(rig._suspension == 0.0 and rig._suspension_velocity == 0.0, "Recuperação preserva impulso antigo da câmera")
 	race.queue_free()
 	await process_frame
 	print("SPEED_FX_CHECK: ", checks, " verificações, ", failures, " falhas")
