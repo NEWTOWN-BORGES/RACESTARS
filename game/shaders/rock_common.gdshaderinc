@@ -26,6 +26,7 @@ float r_noise(vec2 p) {
 float r_fbm(vec2 p) {
 	float s = 0.0, a = 0.5, weight = 0.0;
 	for (int i = 0; i < 4; i++) {
+		if (i >= 1 && cinematic_detail < 0.25) break;
 		// Leve/equilibrado/alto: 2/3/4 oitavas; o perfil leve não avalia as restantes.
 		if (i >= 2 && cinematic_detail < 0.5) break;
 		if (i >= 3 && cinematic_detail < 0.85) break;
@@ -44,6 +45,7 @@ vec4 biome_at(vec2 xz) {
 // Relevo superficial sem texturas ou malhas extra. As derivadas mantêm os detalhes
 // presos à superfície; a distância reduz o grão para evitar cintilação a alta velocidade.
 vec3 relief_normal(vec3 view_pos, vec3 normal, float relief, float strength) {
+	if (cinematic_detail < 0.25) return normal;
 	vec3 dx = dFdx(view_pos);
 	vec3 dy = dFdy(view_pos);
 	vec3 rx = cross(dy, normal);
@@ -73,6 +75,7 @@ float rock_detail_fade(vec3 wp, float view_distance) {
 }
 
 float rock_relief(vec3 wp, vec3 n) {
+	if (cinematic_detail < 0.25) return 0.0;
 	float phase = wp.y * 0.85 + r_noise(wp.xz * 0.032) * 4.0;
 	float ripple = sin(phase) * (1.0 - smoothstep(0.4, 1.8, fwidth(phase)));
 	float relief = r_surface_noise(wp * vec3(0.16, 0.32, 0.16), n) * 0.60 + ripple * 0.16;
@@ -89,6 +92,17 @@ float rock_damp(vec3 wp, vec3 n, vec4 b) {
 }
 
 vec3 strata(vec3 wp, vec3 n, vec4 b) {
+	if (cinematic_detail < 0.25) {
+		// A15: mantém estratos e a paleta dos biomas com uma amostra de ruído.
+		float macro = r_noise(wp.xz * 0.008);
+		float phase = wp.y * 0.20 + macro * 7.0;
+		float band = 0.5 + sin(phase) * 0.5 * (1.0 - smoothstep(0.5, 2.0, fwidth(phase)));
+		vec3 stone = mix(rock_mid, rock_light, band);
+		stone = mix(stone, mix(limestone, chalk, band), b.a);
+		stone = mix(stone, rock_red * (0.87 + band * 0.24), b.b);
+		stone = mix(stone, rock_moss, b.g * smoothstep(0.1, 0.85, n.y) * 0.65);
+		return stone * (0.92 + macro * 0.16);
+	}
 	float warp = r_fbm(wp.xz * 0.008) * 14.0 + r_noise(wp.xz * 0.035) * 2.7;
 	float y = wp.y + warp + dot(wp.xz, vec2(0.006, 0.003));
 	float band = r_noise(vec2(y * 0.17, 3.1));

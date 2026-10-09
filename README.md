@@ -20,6 +20,21 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
 
+## Perfil Samsung A15 / Estável — 0.10
+
+No seletor de gráficos do menu, escolha **Gráficos: A15 (30 FPS)**. O jogo reconhece
+as famílias SM-A155 (4G) e SM-A156 (5G), ativando o perfil na primeira atualização
+se a preferência anterior era Leve. Escolhas posteriores ficam guardadas.
+
+A meta é 30 FPS com física a 60 Hz. O mundo 3D usa resolução adaptativa, enquanto
+menus e botões permanecem na resolução normal. Vegetação pequena/distante,
+sombras e detalhe dos materiais custam menos; árvores grandes, construções,
+trajetos e colisões são preservados. Não há garantia de 30 FPS em todo aparelho;
+90 Hz de ecrã não equivale a 90 FPS de renderização.
+
+[Comparação e medições](docs/a15-profile.md). O APK continua compatível com as
+versões anteriores para atualização e com o multiplayer PC/Android.
+
 ## Novidades 0.9
 
 Em **CORRIDAS → CIDADELA TITÃ**, encontra um circuito suspenso de 7,19 km,
@@ -85,8 +100,8 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-**Versão 0.9:** Cidadela Titã com megaconstruções e saltos, florestas gigantes,
-percurso inicial mais largo e física de suspensão/impactos melhorada. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.9/apk/RACESTARS.apk)
+**Versão 0.10:** acrescenta o perfil **Gráficos: A15 (30 FPS)**, além de Leve,
+Equilibrado e Alto. Conserva o conteúdo da 0.9 e prioriza estabilidade em aparelhos modestos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.10/apk/RACESTARS.apk)
 (Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
@@ -189,7 +204,7 @@ java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2
 
 ## Instalar no Windows
 
-[Baixar instalador Windows 0.9](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.9/windows/RACESTARS-Setup.exe)
+[Baixar instalador Windows 0.10](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.10/windows/RACESTARS-Setup.exe)
 para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
 desinstalador, sem exigir administrador. O instalador não tem certificado
 comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.

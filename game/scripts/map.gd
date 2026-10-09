@@ -52,6 +52,20 @@ var _space: RID
 ## é a grande corrida (os seus portões ficam como marcos) e as outras provas mostram só o pórtico de partida.
 var event: Dictionary = {}
 var explore := false
+var _quality := "balanced"
+var _decor_batches: Array[Dictionary] = []
+
+## Orçamentos reversíveis, só para decoração sem colisão. Sem percorrer a árvore por frame.
+func set_quality(profile: String) -> void:
+	_quality = profile
+	for batch in _decor_batches:
+		_apply_decor_budget(batch)
+
+func _apply_decor_budget(batch: Dictionary) -> void:
+	var node: MultiMeshInstance3D = batch.node
+	var stable := _quality == "stable"
+	node.multimesh.visible_instance_count = maxi(1, int(node.multimesh.instance_count * float(batch.fraction))) if stable else int(batch.count)
+	node.visibility_range_end = float(batch.stable_range) if stable else float(batch.range)
 
 func setup(map_info: Dictionary, t: Node) -> void:
 	info = map_info
@@ -178,10 +192,10 @@ func _place_props() -> void:
 	for key in groups:
 		for name in groups[key]:
 			_multimesh(props[name].mesh, groups[key][name], rock_mat if name in ROCK_PROPS else null,
-				VIS_RANGE.get(name, 1500.0), true)
+				VIS_RANGE.get(name, 1500.0), true, "underbrush" if name in ["fern", "bush", "pebbles"] and not props[name].shape else "")
 
 ## MultiMesh com alcance de visão contado a partir do centro do grupo (mais o raio do grupo).
-func _multimesh(mesh: Mesh, xs: Array, mat: Material, vis: float, shadows: bool) -> MultiMeshInstance3D:
+func _multimesh(mesh: Mesh, xs: Array, mat: Material, vis: float, shadows: bool, decor_kind := "") -> MultiMeshInstance3D:
 	var c := Vector3.ZERO
 	for x in xs:
 		c += x.origin
@@ -205,15 +219,23 @@ func _multimesh(mesh: Mesh, xs: Array, mat: Material, vis: float, shadows: bool)
 	if not shadows:
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
+	if not decor_kind.is_empty():
+		mmi.set_meta("render_budget_kind", decor_kind)
+		var fraction := 0.3 if decor_kind == "ground_cover" else 0.4
+		var distance := 180.0 if decor_kind == "ground_cover" else 320.0
+		var batch := {"node": mmi, "count": mm.visible_instance_count, "range": mmi.visibility_range_end,
+			"fraction": fraction, "stable_range": minf(vis, distance) + rad}
+		_decor_batches.append(batch)
+		_apply_decor_budget(batch)
 	return mmi
 
 ## Vários MultiMesh, um por quadrado do mapa (para o alcance de visão funcionar bem).
-func _grouped(mesh: Mesh, xs: Array, group: float, vis: float, mat: Material = null, shadows := false) -> void:
+func _grouped(mesh: Mesh, xs: Array, group: float, vis: float, mat: Material = null, shadows := false, decor_kind := "") -> void:
 	var g := {}
 	for x in xs:
 		g.get_or_add(Vector2i(floori(x.origin.x / group), floori(x.origin.z / group)), []).append(x)
 	for k in g:
-		_multimesh(mesh, g[k], mat, vis, shadows)
+		_multimesh(mesh, g[k], mat, vis, shadows, decor_kind)
 
 func _place_static(name: String, xf: Transform3D, mat: Material, double_shadow := false) -> MeshInstance3D:
 	var P := _prop(name)
@@ -403,7 +425,7 @@ func _place_cover() -> void:
 		var xs: Array = []
 		for g in info[spec[1]]:
 			xs.append(_xf(Vector3(g[0], g[1], g[2]), g[3], g[4]))
-		_grouped(_prop(spec[0]).mesh, xs, COVER_GROUP, spec[2])
+		_grouped(_prop(spec[0]).mesh, xs, COVER_GROUP, spec[2], null, false, "ground_cover")
 
 func _place_banners() -> void:
 	# bandeirolas penduradas entre dois postes, por cima da estrada (como nas imagens)
@@ -691,7 +713,9 @@ func _place_veg() -> void:
 			PhysicsServer3D.body_add_shape(bodies[key], shp.get_rid(), xf * Transform3D(Basis(), Vector3(0, props[types[t]].h * 0.5, 0)))
 	for key in groups:
 		var name: String = types[key.x]
-		_multimesh(props[name].mesh, groups[key], null, VEG_VIS.get(name, 900.0), name != "fern" and name != "bush")
+		# Aqui RIDE_OVER não recebe colisores; as peças de info.props continuam intactas.
+		var decor_kind := "underbrush" if name in ["fern", "bush"] or name in RIDE_OVER else ""
+		_multimesh(props[name].mesh, groups[key], null, VEG_VIS.get(name, 900.0), name != "fern" and name != "bush", decor_kind)
 
 # ------------------------------------------------------------------ balizas ao longo de cada caminho (cor = nível)
 func _place_route_posts() -> void:

@@ -617,6 +617,9 @@ func _check_stuck(dt: float) -> void:
 func _adapt_quality(dt: float) -> void:
 	if args.has("autoplay"):
 		return
+	if environment_system.quality == "stable":
+		environment_system.adapt_performance(dt)
+		return
 	_fps_acc += 1.0 / maxf(dt, 0.0001)
 	_fps_n += 1
 	if _fps_n < 180:

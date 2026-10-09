@@ -17,6 +17,13 @@ var _region_color := Color(0.68, 0.73, 0.75)
 var _region_begin := 350.0
 var _region_end := 5700.0
 var _region_energy := 0.56
+var _scale_ceiling := 1.0
+var _scale_floor := 1.0
+var _frame_seconds := 0.0
+var _frame_count := 0
+var _recovery_windows := 0
+var _warmup_seconds := 4.0
+var _contact_shadow: MeshInstance3D
 
 func setup(world: WorldEnvironment, light: DirectionalLight3D, vehicle: Node3D, level: Node3D, fx: Node, preference: String) -> void:
 	environment = world.environment.duplicate(true)
@@ -38,14 +45,16 @@ func setup(world: WorldEnvironment, light: DirectionalLight3D, vehicle: Node3D, 
 	wear.name = "SurfaceWear"
 	add_child(wear)
 	wear.setup(map)
+	_make_contact_shadow()
 	set_quality(preference)
 	update_region(player.global_position, 0.0, false, true)
 
 func set_quality(value: String) -> void:
 	quality = value if value in Quality.NAMES else "balanced"
 	var high := quality == "ultra"
-	var light := quality == "mobile"
-	RenderingServer.global_shader_parameter_set("cinematic_detail", 0.35 if light else (1.0 if high else 0.65))
+	var stable := quality == "stable"
+	var light := quality in ["stable", "mobile"]
+	RenderingServer.global_shader_parameter_set("cinematic_detail", 0.18 if stable else (0.35 if light else (1.0 if high else 0.65)))
 	var forward := RenderingServer.get_current_rendering_method() == "forward_plus"
 	var version := Engine.get_version_info()
 	var compat_glow := int(version.major) > 4 or int(version.minor) >= 6
@@ -72,16 +81,80 @@ func set_quality(value: String) -> void:
 	environment.sky.radiance_size = Sky.RADIANCE_SIZE_64 if light else (Sky.RADIANCE_SIZE_256 if high else Sky.RADIANCE_SIZE_128)
 	sun.light_color = Color(1.0, 0.88, 0.71)
 	sun.light_energy = 1.38
+	sun.shadow_enabled = not stable
+	_contact_shadow.visible = stable
 	sun.directional_shadow_max_distance = 120.0 if light else (300.0 if high else 220.0)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if light else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.light_angular_distance = 0.3 if forward and high else 0.0
-	effects.set_quality("mobile" if light else "pc")
+	effects.set_quality("low" if stable else ("mobile" if light else "pc"))
 	ambient.set_quality(quality)
+	map.set_quality(quality)
+	map.terrain.set_quality(quality)
 	var forests := map.get_node_or_null("MegaForests")
 	if forests:
 		forests.set_quality(quality)
-	get_viewport().msaa_3d = Viewport.MSAA_4X if high else Viewport.MSAA_2X
+	var viewport := get_viewport()
+	viewport.msaa_3d = Viewport.MSAA_4X if high else Viewport.MSAA_2X
+	viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	# Apenas o mundo 3D é escalado; interface/toques permanecem na resolução nativa.
+	_scale_ceiling = clampf(600.0 / maxf(float(get_window().size.y), 1.0), 0.5, 0.8) if stable else 1.0
+	_scale_floor = maxf(0.4, _scale_ceiling * 0.8) if stable else 1.0
+	viewport.scaling_3d_scale = _scale_ceiling
+	Engine.max_fps = 30 if stable else 0
+	_frame_seconds = 0.0
+	_frame_count = 0
+	_recovery_windows = 0
+	_warmup_seconds = 4.0
 	_rebuild_local_lighting(not light, forward and high)
+
+func adapt_performance(dt: float) -> void:
+	if quality != "stable":
+		return
+	if _warmup_seconds > 0.0:
+		_warmup_seconds -= dt
+		return
+	_frame_seconds += minf(dt, 0.15)
+	_frame_count += 1
+	if _frame_seconds < 3.0:
+		return
+	var frame_time := _frame_seconds / maxf(1.0, _frame_count)
+	_frame_seconds = 0.0
+	_frame_count = 0
+	var viewport := get_viewport()
+	if frame_time > 1.0 / 27.0:
+		viewport.scaling_3d_scale = maxf(_scale_floor, viewport.scaling_3d_scale * 0.92)
+		_recovery_windows = 0
+	elif frame_time < 1.0 / 29.6:
+		_recovery_windows += 1
+		if _recovery_windows >= 3:
+			viewport.scaling_3d_scale = minf(_scale_ceiling, viewport.scaling_3d_scale + 0.025)
+			_recovery_windows = 0
+	else:
+		_recovery_windows = 0
+
+func _exit_tree() -> void:
+	Engine.max_fps = 0
+
+func _make_contact_shadow() -> void:
+	# Um único disco suave substitui a sombra do veículo sem um passe de shadowmap.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 24:
+		for point in [Vector3.ZERO, Vector3(cos(TAU * i / 24), 0, sin(TAU * i / 24)), Vector3(cos(TAU * (i + 1) / 24), 0, sin(TAU * (i + 1) / 24))]:
+			st.set_color(Color(0.05, 0.065, 0.075, 0.32 if point == Vector3.ZERO else 0.0))
+			st.set_normal(Vector3.UP)
+			st.add_vertex(point * Vector3(5.0, 1.0, 8.0))
+	var material := StandardMaterial3D.new()
+	material.vertex_color_use_as_albedo = true
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_contact_shadow = MeshInstance3D.new()
+	_contact_shadow.name = "VehicleContactShadow"
+	_contact_shadow.mesh = st.commit()
+	_contact_shadow.material_override = material
+	_contact_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_contact_shadow)
 
 func _rebuild_local_lighting(probes: bool, fog: bool) -> void:
 	for child in reflections.get_children():
@@ -123,6 +196,11 @@ func _add_probe(label: String, pos: Vector3, interior: bool) -> void:
 func update_environment(cave: bool, dt: float) -> void:
 	update_region(player.global_position, dt, cave)
 	ambient.update_environment(player, cave)
+	_contact_shadow.visible = quality == "stable" and player.on_ground and player.ground_valid and player.ground_normal.y > 0.65
+	if _contact_shadow.visible:
+		var normal: Vector3 = player.ground_normal
+		var forward: Vector3 = player.forward().slide(normal).normalized()
+		_contact_shadow.global_transform = Transform3D(Basis(normal.cross(forward), normal, forward), player.ground_point + normal * 0.07)
 
 func update_region(pos: Vector3, dt: float, cave := false, immediate := false) -> void:
 	_region_clock -= dt
@@ -149,7 +227,7 @@ func update_region(pos: Vector3, dt: float, cave := false, immediate := false) -
 	var blend := 1.0 if immediate else 1.0 - exp(-dt * 1.5)
 	environment.fog_light_color = environment.fog_light_color.lerp(_region_color, blend)
 	environment.fog_depth_begin = lerpf(environment.fog_depth_begin, _region_begin, blend)
-	environment.fog_depth_end = lerpf(environment.fog_depth_end, _region_end, blend)
+	environment.fog_depth_end = lerpf(environment.fog_depth_end, minf(_region_end, 3200.0) if quality == "stable" else _region_end, blend)
 	environment.ambient_light_energy = lerpf(environment.ambient_light_energy, 0.30 if cave else _region_energy, blend)
 
 func _biome_atmosphere(biome: String) -> Array:

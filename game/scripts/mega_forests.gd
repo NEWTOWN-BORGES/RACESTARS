@@ -45,12 +45,13 @@ func setup(map: Node3D) -> void:
 	print("mega forests: %d groves, %d towering trees, %d ferns" % [_groves.size(), _tree_count, _fern_count])
 
 func set_quality(tier: String) -> void:
-	_quality = tier if tier in ["mobile", "balanced", "ultra"] else "balanced"
+	_quality = tier if tier in ["stable", "mobile", "balanced", "ultra"] else "balanced"
 	for fern in _ferns:
-		fern.multimesh.visible_instance_count = int(fern.multimesh.instance_count * (0.25 if _quality == "mobile" else 0.6 if _quality == "balanced" else 1.0))
-		fern.visibility_range_end = 650.0 if _quality == "mobile" else 1100.0
+		fern.multimesh.visible_instance_count = int(fern.multimesh.instance_count * (0.12 if _quality == "stable" else 0.25 if _quality == "mobile" else 0.6 if _quality == "balanced" else 1.0))
+		fern.visibility_range_end = 420.0 if _quality == "stable" else 650.0 if _quality == "mobile" else 1100.0
 	for canopy in _canopies:
-		canopy.visibility_range_end = 3200.0 if _quality == "mobile" else 4800.0
+		# Todos os troncos e copas persistem; o perfil estável limita a distância de sombra na luz.
+		canopy.visibility_range_end = 3200.0 if _quality in ["stable", "mobile"] else 4800.0
 		canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if _quality == "mobile" else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
 func _exit_tree() -> void:

@@ -34,7 +34,7 @@ func _ready() -> void:
 	add_child(dust)
 
 func set_quality(quality: String) -> void:
-	dust.amount = 16 if quality == "mobile" else (64 if quality == "ultra" else 36)
+	dust.amount = 6 if quality == "stable" else (16 if quality == "mobile" else (64 if quality == "ultra" else 36))
 
 func update_environment(player: Node3D, cave: bool) -> void:
 	var p := player.global_position

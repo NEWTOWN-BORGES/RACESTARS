@@ -22,6 +22,14 @@ var biome_texture: ImageTexture
 var height_texture: ImageTexture
 var focus: Node3D
 var _timer := 0.0
+var _lod_distance_scale := 1.0
+var _view_distance := VIEW_DIST
+
+## Só muda as grelhas desenhadas; alturas, terreno próximo e colisão são os mesmos.
+func set_quality(profile: String) -> void:
+	_lod_distance_scale = 0.55 if profile == "stable" else 1.0
+	_view_distance = 3000.0 if profile == "stable" else VIEW_DIST
+	_update_lods()
 
 func setup(info: Dictionary) -> void:
 	res = int(info.res)
@@ -186,10 +194,10 @@ func _update_lods() -> void:
 		var dz := maxf(0.0, maxf(mn.y - p.z, p.z - (mn.y + span)))
 		var d := sqrt(dx * dx + dz * dz)
 		var mi: MeshInstance3D = c.node
-		mi.visible = d < VIEW_DIST
+		mi.visible = d < _view_distance
 		var lod := LOD_DIST.size()
 		for i in LOD_DIST.size():
-			if d < LOD_DIST[i]:
+			if d < LOD_DIST[i] * _lod_distance_scale:
 				lod = i
 				break
 		if lod != c.lod:

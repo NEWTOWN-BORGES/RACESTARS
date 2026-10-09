@@ -87,6 +87,7 @@ void fragment() {
 	// debaixo de água: mais escuro e esverdeado
 	float wet = 0.0;
 	float shoreline = 0.0;
+	if (cinematic_detail >= 0.25) {
 	for (int i = 0; i < 24; i++) {
 		vec4 r = water_rects[i];
 		if (r.z < 0.0) break;
@@ -96,6 +97,10 @@ void fragment() {
 		float water_height = water_rots[i].z;
 		wet = max(wet, inside_water * (1.0 - smoothstep(water_height - 6.0, water_height + 0.3, wpos.y)));
 		shoreline = max(shoreline, inside_water * (1.0 - smoothstep(water_height, water_height + 2.0, wpos.y)));
+	}
+	} else {
+		wet = 1.0 - smoothstep(water_y - 6.0, water_y + 0.3, wpos.y);
+		shoreline = 1.0 - smoothstep(water_y, water_y + 2.0, wpos.y);
 	}
 	c = mix(c, c * vec3(0.55, 0.72, 0.72), wet);
 	c *= 1.0 - shoreline * 0.12;

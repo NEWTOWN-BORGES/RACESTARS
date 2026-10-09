@@ -64,3 +64,6 @@ aparecem erros de script ou de compilação de shader nas capturas finais.
 
 A evolução de materiais e atmosfera da versão 0.8 está documentada em
 [cinematic-audit.md](cinematic-audit.md), com capturas comparáveis.
+
+A versão 0.10 acrescenta [A15 / Estável](a15-profile.md), com resolução 3D
+adaptativa, apresentação limitada a 30 FPS e orçamento menor de cenário.
