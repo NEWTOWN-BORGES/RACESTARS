@@ -134,6 +134,7 @@ func _load_events() -> void:
 	var d = JSON.parse_string(f.get_as_text())
 	if d is Array and not d.is_empty():
 		events = d
+	events.append(preload("res://scripts/titan_circuit.gd").event_data())
 
 func _event_name(id: String) -> String:
 	for e in events:
@@ -209,8 +210,8 @@ func _build() -> void:
 	main_box.add_child(name_edit)
 	main_box.add_child(_button("EXPLORAR O MUNDO", _on_solo.bind("explorar"), Color("#5fe06a")))
 	main_box.add_child(_button("CORRIDAS", func(): _show(races_box)))
-	main_box.add_child(_button("JOGAR A DOIS: CRIAR", _on_host, Color("#7ff6ff")))
-	main_box.add_child(_button("JOGAR A DOIS: ENTRAR", _on_join_screen, Color("#7ff6ff")))
+	main_box.add_child(_button("REDE LOCAL: CRIAR", _on_host, Color("#7ff6ff")))
+	main_box.add_child(_button("REDE LOCAL: ENTRAR", _on_join_screen, Color("#7ff6ff")))
 	# sala de espera (anfitrião e convidados)
 	lobby_box = _box()
 	lobby_info = _label("", 28)
@@ -236,11 +237,12 @@ func _build() -> void:
 			col = Color("#7ff6ff")
 		var b := _button(_event_text(e), _on_race.bind(String(e.id)), col)
 		b.add_theme_font_size_override("font_size", 30)
+		b.custom_minimum_size.y = 64
 		races_box.add_child(b)
 	races_box.add_child(_button("VOLTAR", func(): _show(main_box), Color("#ff6a5a")))
 	# procurar corridas
 	join_box = _box()
-	join_box.add_child(_label("Jogos encontrados no mesmo Wi-Fi:", 28))
+	join_box.add_child(_label("PC e Android · até 4 jogadores no mesmo Wi-Fi", 25))
 	hosts_box = VBoxContainer.new()
 	hosts_box.add_theme_constant_override("separation", 10)
 	join_box.add_child(hosts_box)

@@ -77,6 +77,9 @@ func set_quality(value: String) -> void:
 	sun.light_angular_distance = 0.3 if forward and high else 0.0
 	effects.set_quality("mobile" if light else "pc")
 	ambient.set_quality(quality)
+	var forests := map.get_node_or_null("MegaForests")
+	if forests:
+		forests.set_quality(quality)
 	get_viewport().msaa_3d = Viewport.MSAA_4X if high else Viewport.MSAA_2X
 	_rebuild_local_lighting(not light, forward and high)
 

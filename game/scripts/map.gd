@@ -79,6 +79,16 @@ func setup(map_info: Dictionary, t: Node) -> void:
 	var scenery := preload("res://scripts/island_scenery.gd").new()
 	add_child(scenery)
 	scenery.setup(info, terrain)
+	var titan := preload("res://scripts/titan_circuit.gd").new()
+	titan.name = "TitanCircuit"
+	add_child(titan)
+	titan.setup(terrain)
+	var forests := preload("res://scripts/mega_forests.gd").new()
+	forests.name = "MegaForests"
+	add_child(forests)
+	forests.setup(self)
+	for gate in preload("res://scripts/titan_circuit.gd").event_data().gates:
+		spawn_points.append([Vector3(gate.p[0], gate.p[1], gate.p[2]), Vector2(gate.dir[0], gate.dir[1]), 2])
 	_place_checkpoints()
 	_place_route_posts()
 	_place_pads()
@@ -269,7 +279,7 @@ func _place_set_pieces() -> void:
 		for e in info.get("events", []):
 			if e.id == event.id:
 				continue
-			var ehw := 46.0 if e.type == "drag" else 34.0
+			var ehw: float = e.get("half_w", 46.0 if e.type == "drag" else 34.0)
 			_portal(e.gates[-1] if e.type == "circuit" else e.start, String(e.name).to_upper(), 0.0 if e.type == "circuit" else 30.0, ehw)
 
 func _portal(d: Dictionary, text: String, ahead: float, half_w: float) -> void:

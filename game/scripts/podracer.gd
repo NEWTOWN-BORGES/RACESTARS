@@ -153,13 +153,16 @@ func _physics_process(dt: float) -> void:
 	q.exclude = [get_rid()]
 	q.collision_mask = RIDE_MASK
 	var hit := space.intersect_ray(q)
-	ground_valid = not hit.is_empty()
+	# Uma face quase vertical não serve de apoio à suspensão.
+	ground_valid = not hit.is_empty() and hit.normal.y > 0.6
 	var ground_y := -INF
+	var support_normal := Vector3.UP
 	on_water = false
-	if not hit.is_empty():
+	if ground_valid:
 		ground_point = hit.position
 		ground_y = hit.position.y
-		ground_normal = ground_normal.lerp(hit.normal, 0.25).normalized()
+		support_normal = hit.normal
+		ground_normal = ground_normal.lerp(hit.normal, 1.0 - exp(-17.26 * dt)).normalized()
 		on_water = hit.collider != null and hit.collider.has_meta("water")
 		# inclinação do chão: altura 6 m à frente e 6 m atrás (o corpo acompanha subidas e descidas)
 		var f6 := forward() * 6.0
@@ -219,15 +222,14 @@ func _physics_process(dt: float) -> void:
 	elif on_ground:
 		vel.x *= exp(-1.2 * dt)
 		vel.z *= exp(-1.2 * dt)
-	# flutuar: mola empurra para cima; perto do chão puxa de leve; longe = queda livre (salto)
+	# Suspensão amortecida em relação ao declive: subir uma rampa não comprime
+	# a mola como se fosse uma aterragem. A integração implícita é estável com dt maior.
 	var was_air := not on_ground
 	var vy_before := vel.y
-	if err > 0.0:
-		vel.y += (err * SPRING - vel.y * DAMP) * dt
-		on_ground = true
-	elif err > -0.9:
-		vel.y += (err * SPRING * 0.35 - GRAVITY) * dt
-		vel.y *= exp(-3.0 * dt)
+	if ground_valid and err > -0.9:
+		var ground_vy := -(support_normal.x * vel.x + support_normal.z * vel.z) / support_normal.y
+		var relative_vy := vel.y - ground_vy
+		vel.y = ground_vy + (relative_vy + err * SPRING * dt) / (1.0 + DAMP * dt + SPRING * dt * dt)
 		on_ground = true
 	else:
 		vel.y -= GRAVITY * dt
@@ -251,23 +253,33 @@ func _physics_process(dt: float) -> void:
 		vel.x *= k
 		vel.z *= k
 	if running:
-		# bater não acaba a corrida: ressalta, desvia para o lado da parede e perde velocidade
+		# O deslizamento flutuante conserva o módulo da velocidade; reconstruir a
+		# componente tangente evita que uma parede transforme impacto em aceleração.
+		# Só a componente contra a parede ressalta: um raspão preserva o embalo.
 		var worst := 0.0
+		var wall_velocity := Vector3(before.x, 0.0, before.z)
+		var touched_wall := false
+		var touched_support := false
 		for i in get_slide_collision_count():
 			var c := get_slide_collision(i)
 			var n := c.get_normal()
-			if n.y > 0.6:
+			if absf(n.y) > 0.6:
+				touched_support = true
 				continue
-			var impact := -before.dot(n)
-			if impact > worst:
-				worst = impact
-				var hn := Vector3(n.x, 0.0, n.z).normalized()
-				if impact > 6.0:
-					vel *= 1.0 - clampf(impact / 150.0, 0.08, 0.6)
-					vel += hn * minf(impact * 0.3, 14.0)
-					var along_wall := Vector3(vel.x, 0.0, vel.z)
-					if along_wall.length() > 4.0 and impact > 20.0:
-						heading = lerp_angle(heading, atan2(-along_wall.x, -along_wall.z), 0.35)
+			var hn := Vector3(n.x, 0.0, n.z).normalized()
+			var impact := maxf(-wall_velocity.dot(hn), 0.0)
+			worst = maxf(worst, impact)
+			if impact > 0.0:
+				touched_wall = true
+				wall_velocity += hn * (impact + minf(impact * 0.18, 10.0))
+		if touched_wall:
+			vel.x = wall_velocity.x
+			vel.z = wall_velocity.z
+			# A parede não deve travar uma queda nem lançar o veículo para cima.
+			if not touched_support:
+				vel.y = before.y
+			if wall_velocity.length() > 4.0 and worst > 20.0:
+				heading = lerp_angle(heading, atan2(-wall_velocity.x, -wall_velocity.z), 0.35)
 		if worst > 6.0:
 			if autopilot and worst > 50.0:
 				print("  batida forte: impacto=", snappedf(worst, 0.1), " em ", global_position)

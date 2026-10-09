@@ -72,6 +72,7 @@ func _ready() -> void:
 	var to_sun := Vector3(sin(az) * cos(el), sin(el), -cos(az) * cos(el))
 	sun.global_transform = Transform3D(Basis.looking_at(-to_sun, Vector3.UP), Vector3.ZERO)
 	info = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map/map.json"))
+	info.events.append(preload("res://scripts/titan_circuit.gd").event_data())
 	ev = _make_event(String(args.get("event", Net.event)))
 	for lap in int(ev.laps):
 		for i in ev.gates.size():
@@ -193,7 +194,7 @@ func _make_event(id: String) -> Dictionary:
 		for e in info.get("events", []):
 			if e.id == id:
 				var out: Dictionary = e.duplicate()
-				out["half_w"] = 46.0 if e.type == "drag" else 34.0
+				out["half_w"] = e.get("half_w", 46.0 if e.type == "drag" else 34.0)
 				if not out.has("finish"):
 					out["finish"] = {}
 				return out
@@ -273,7 +274,8 @@ func _process(dt: float) -> void:
 				_hint_t -= dt
 				if _hint_t <= 0.0 and respawn_timer < 0.0:
 					hud.set_center("")
-			if p.y < float(info.fall_y) and player.running:
+			var fall_limit := 360.0 if ev.id == "titan" else float(info.fall_y)
+			if p.y < fall_limit and player.running:
 				player.running = false
 				_on_fall()
 			if respawn_timer >= 0.0:
@@ -537,6 +539,8 @@ func respawn(at_gate := false) -> void:
 		var g: Dictionary = ev.start if next_cp == 0 or explore else cps[next_cp - 1]
 		pos = Vector3(g.p[0], 0.0, g.p[2])
 		pos.y = terrain.height_at(pos.x, pos.z)
+		if ev.id == "titan":
+			pos.y = float(g.p[1])
 		dir = Vector2(g.dir[0], g.dir[1])
 	_safe.clear()
 	player.place(pos, dir, 30.0)

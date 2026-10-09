@@ -46,9 +46,17 @@ func _capture() -> void:
 			views.append(["02-costa", site.position + Vector3(-230, 125, 260), site.position + Vector3(0, 48, 0)])
 		elif site.name == "Santuário do Cenote":
 			views.append(["03-santuario", site.position + Vector3(230, 155, 245), site.position + Vector3(0, 65, 0)])
+	views.append(["04-titan", Vector3(10780, 1110, 2340), Vector3(9500, 670, 1000)])
+	views.append(["05-salto", Vector3(9205, 476, 398), Vector3(9460, 460, 350)])
+	var forests: Node = race.map.get_node_or_null("MegaForests")
+	if forests:
+		for grove in forests.get_meta("groves", []):
+			if int(grove.tree_count) > 80:
+				views.append(["06-floresta", grove.viewpoint + Vector3(0, 20, 0), grove.position + Vector3(0, 65, 0)])
+				break
 	DirAccess.make_dir_recursive_absolute(output)
 	for view in views:
-		if not only.is_empty() and only != view[0]:
+		if not only.is_empty() and not view[0] in only.split(","):
 			continue
 		race.cam.global_position = view[1]
 		race.cam.look_at(view[2])

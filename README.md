@@ -20,6 +20,26 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
 
+## Novidades 0.9
+
+Em **CORRIDAS → CIDADELA TITÃ**, encontra um circuito suspenso de 7,19 km,
+com duas voltas, pista de 84 m, curvas fechadas, dois saltos e desvios laterais.
+O anel orbital tem 740 m de diâmetro, entre torres e passadiços monumentais.
+Oito bosques acrescentam árvores de 60–150 m à selva e à floresta.
+
+O caminho central dos dois primeiros trechos tem margens alargadas até 128 m,
+com transições mais estreitas onde há pontes e suporte do caminho superior.
+Raspões preservam a velocidade ao longo da parede; suspensão e aterragens estão
+mais estáveis. A aceleração, velocidade máxima, direção e derrapagem mantêm os valores.
+
+![Cidadela Titã](screenshots/09-04-titan.png)
+[Ver salto](screenshots/09-05-salto.png) · [Ver floresta](screenshots/09-06-floresta.png) · [Testes e detalhes](docs/adrenaline-09.md)
+
+**PC contra Android:** usem a mesma versão e rede Wi-Fi/hotspot. Um escolhe
+**REDE LOCAL: CRIAR**, os restantes **REDE LOCAL: ENTRAR**. Até quatro jogadores.
+Se a sala não aparecer, escreva o IP mostrado pelo anfitrião. No Windows, permita
+RACESTARS na rede privada quando o firewall perguntar. Internet não é necessária.
+
 ## Evolução visual 0.8
 
 Materiais com desgaste, metal escovado, musgo contextual, ondas e espuma costeira,
@@ -57,7 +77,7 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
     salto numa fenda, guardiões, e uma pirâmide com obeliscos no meio.
   - **RETA DO SAL** (arranque de 3 km): a direito na planície de sal, com placas de aceleração alternadas e pilares de cristal.
   - As **placas de aceleração** (setas no chão) dão um empurrão. Estão sempre em retas.
-- **JOGAR A DOIS** (PvP local): dois ou mais telemóveis na mesma rede Wi-Fi (ou ligados ao hotspot de um deles).
+- **REDE LOCAL** (PvP local, PC e Android): dois ou mais telemóveis na mesma rede Wi-Fi (ou ligados ao hotspot de um deles).
   - Um escolhe **CRIAR**, o outro **ENTRAR**: a procura é automática e também se pode escrever o endereço.
   - O anfitrião escolhe **EXPLORAR JUNTOS** ou a pista (**PISTA ▸** troca) e **COMEÇAR A CORRIDA**.
   - Cada jogador tem a sua cor e o nome por cima do veículo.
@@ -65,8 +85,8 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-**Versão 0.8:** refina materiais, água, vegetação, céu e atmosfera por bioma;
-preserva a ilha, os modelos, as pistas e os controlos. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.8/apk/RACESTARS.apk)
+**Versão 0.9:** Cidadela Titã com megaconstruções e saltos, florestas gigantes,
+percurso inicial mais largo e física de suspensão/impactos melhorada. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.9/apk/RACESTARS.apk)
 (Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
@@ -169,7 +189,7 @@ java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2
 
 ## Instalar no Windows
 
-[Baixar instalador Windows 0.8](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.8/windows/RACESTARS-Setup.exe)
+[Baixar instalador Windows 0.9](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.9/windows/RACESTARS-Setup.exe)
 para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
 desinstalador, sem exigir administrador. O instalador não tem certificado
 comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.
