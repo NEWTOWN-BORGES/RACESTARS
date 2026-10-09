@@ -17,7 +17,7 @@ const SAVE_PATH := "user://save.cfg"
 const SAVE_KEY := "race_v6"
 const SUN_AZIMUTH := 35.0
 const SUN_ELEVATION := 32.0
-const HINT := "Esquerda do ecrã: virar   ·   direita: TRAVÃO DE MÃO (travar + virar = derrapar)"
+var control_hint := ""
 const HINT_EXPLORE := "Explora à vontade   ·   MAPA: ver o mundo e viajar   ·   travar + virar = derrapar"
 
 var state := State.COUNTDOWN
@@ -65,6 +65,7 @@ func _ready() -> void:
 	process_physics_priority = 10
 	DisplayServer.screen_set_keep_on(true)
 	_setup_input()
+	control_hint = preload("res://scripts/controls.gd").hint()
 	args = _parse_args()
 	explore = String(args.get("mode", Net.mode)) == "explorar"
 	mp = Net.online and Net.players.size() > 1
@@ -171,16 +172,16 @@ func _ready() -> void:
 		state = State.FREE
 		player.running = true
 		audio.start_run()
-		hud.set_center("", "", HINT_EXPLORE)
+		hud.set_center("", "", HINT_EXPLORE + "\n" + control_hint)
 		_hint_t = 7.0
 		if args.has("travel"):
 			var tv := String(args["travel"]).split(",")
 			_travel(Vector2(float(tv[0]), float(tv[1])))
 	elif mp:
-		hud.set_center("", "À espera dos outros jogadores...", HINT)
+		hud.set_center("", "À espera dos outros jogadores...", control_hint)
 		Net.report_loaded()
 	else:
-		hud.set_center("", "", HINT)
+		hud.set_center("", "", control_hint)
 	if args.has("shots"):
 		for s in String(args["shots"]).split(","):
 			shots.append(float(s))
@@ -226,14 +227,7 @@ func _build_route() -> Array:
 	return out
 
 func _setup_input() -> void:
-	var binds := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D], "brake": [KEY_DOWN, KEY_S, KEY_SPACE], "recover": [KEY_R]}
-	for action in binds:
-		if not InputMap.has_action(action):
-			InputMap.add_action(action, 0.2)
-		for key in binds[action]:
-			var ev := InputEventKey.new()
-			ev.physical_keycode = key
-			InputMap.action_add_event(action, ev)
+	preload("res://scripts/controls.gd").setup()
 
 func _parse_args() -> Dictionary:
 	var out := {}
@@ -247,7 +241,7 @@ func _parse_args() -> Dictionary:
 	return out
 
 func _physics_process(dt: float) -> void:
-	if Input.is_action_just_pressed("recover"):
+	if Input.is_action_just_pressed("recover") and not player.controls_blocked:
 		_recover_request()
 	fx_state.capture(player, map.in_cave(player.global_position))
 	camera_rig.update_state(fx_state, dt)
@@ -261,7 +255,7 @@ func _process(dt: float) -> void:
 			var n := int(ceil(t_count - 0.6))
 			if n != _last_count and n >= 1 and n <= 3:
 				_last_count = n
-				hud.set_center(str(n), "", HINT)
+				hud.set_center(str(n), "", control_hint)
 				audio.beep(false)
 			if t_count <= 0.6 and state == State.COUNTDOWN:
 				state = State.RACE

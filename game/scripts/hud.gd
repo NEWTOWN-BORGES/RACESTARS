@@ -162,6 +162,25 @@ func _ready() -> void:
 	close.position = Vector2(-250, 24)
 	map_panel.add_child(close)
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_echo():
+		return
+	if event.is_action_pressed("pause_game"):
+		if map_panel.visible:
+			map_panel.visible = false
+			_update_pause()
+		else:
+			_toggle_pause()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_cancel") and (pause_panel.visible or map_panel.visible):
+		pause_panel.visible = false
+		map_panel.visible = false
+		_update_pause()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("camera_cycle") and not pause_panel.visible and not map_panel.visible and not results_panel.visible:
+		camera_pressed.emit()
+		get_viewport().set_input_as_handled()
+
 func set_mode(is_explore: bool) -> void:
 	explore = is_explore
 	time_label.visible = not explore
@@ -189,6 +208,7 @@ func _panel() -> Control:
 
 func _big_button(text: String, cb: Callable) -> Button:
 	var b := _button(text, cb)
+	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(440, 76)
 	b.add_theme_font_size_override("font_size", 30)
 	return b
@@ -201,6 +221,13 @@ func _pause_and(action: String) -> void:
 ## Sozinho, o jogo pára enquanto a pausa ou o mapa estão abertos (no PvP o mundo continua).
 func _update_pause() -> void:
 	get_tree().paused = not multiplayer_mode and (pause_panel.visible or map_panel.visible)
+	if pause_panel.visible:
+		preload("res://scripts/controls.gd").focus_first(pause_panel)
+	elif not map_panel.visible and not results_panel.visible:
+		root.get_viewport().gui_release_focus()
+	if is_instance_valid(player):
+		player._touches.clear()
+		player.controls_blocked = pause_panel.visible or map_panel.visible or results_panel.visible
 
 func _toggle_pause() -> void:
 	pause_panel.visible = not pause_panel.visible
@@ -237,6 +264,8 @@ func set_standings(rows: Array) -> void:
 func show_results(is_host: bool) -> void:
 	results_panel.visible = true
 	results_panel.get_child(0).get_child(1).visible = is_host
+	preload("res://scripts/controls.gd").focus_first(results_panel)
+	_update_pause()
 
 func show_zone(text: String) -> void:
 	zone_label.text = text.to_upper()
@@ -292,6 +321,11 @@ func _button(text: String, cb: Callable) -> Button:
 	b.add_theme_stylebox_override("normal", sb)
 	b.add_theme_stylebox_override("hover", sb)
 	b.add_theme_stylebox_override("pressed", sb)
+	var focus: StyleBoxFlat = sb.duplicate()
+	focus.border_color = Color.WHITE
+	focus.bg_color = Color(0.3, 0.22, 0.09, 0.95)
+	focus.set_border_width_all(5)
+	b.add_theme_stylebox_override("focus", focus)
 	b.add_theme_color_override("font_color", Color("#ffe3a8"))
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(cb)

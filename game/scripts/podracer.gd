@@ -36,6 +36,7 @@ const RIDE_MASK := 3            # o raio do chão também vê a camada 2 (pedras
 const MODEL_OFFSET := Vector3(0.0, 0.0, 4.0)   # o modelo nasce na cabine; recua para o centro ficar na origem
 
 var running := false
+var controls_blocked := false
 var heading := 0.0
 var vel := Vector3.ZERO
 var steer := 0.0
@@ -390,26 +391,31 @@ func _unhandled_input(e: InputEvent) -> void:
 		_touches[e.index] = e.position
 
 func _read_input() -> void:
-	var k := Input.get_axis("steer_left", "steer_right")
-	var kb_brake := Input.is_action_pressed("brake")
+	if controls_blocked:
+		steer_target = 0.0
+		input_left = false
+		input_right = false
+		braking = true
+		return
+	var axis := Input.get_axis("steer_left", "steer_right")
 	var size := get_viewport().get_visible_rect().size
-	input_left = false
-	input_right = false
+	var touch_left := false
+	var touch_right := false
 	var touch_brake := false
 	for pos: Vector2 in _touches.values():
 		if pos.x < size.x * 0.5:
 			if pos.x < size.x * 0.18:
-				input_left = true
+				touch_left = true
 			else:
-				input_right = true
+				touch_right = true
 		else:
 			touch_brake = true
-	if k < -0.01:
-		input_left = true
-	elif k > 0.01:
-		input_right = true
-	braking = kb_brake or touch_brake
-	steer_target = (1.0 if input_left else 0.0) - (1.0 if input_right else 0.0)
+	var touch_axis := (1.0 if touch_left else 0.0) - (1.0 if touch_right else 0.0)
+	# Preservar a amplitude do analógico: uma pequena inclinação dá uma curva suave.
+	steer_target = clampf(-axis + touch_axis, -1.0, 1.0)
+	input_left = steer_target > 0.05
+	input_right = steer_target < -0.05
+	braking = Input.is_action_pressed("brake") or touch_brake
 
 # ------------------------------------------------------------------ piloto automático (testes)
 ## Desvio de obstáculos do piloto automático (testes): raios para a frente; foge para o lado

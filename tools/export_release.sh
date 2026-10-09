@@ -4,6 +4,6 @@ set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$repo_dir/build/release/windows"
 godot --headless --path "$repo_dir/game" --export-release "Windows Desktop" "$repo_dir/build/release/windows/RACESTARS.exe"
-godot --headless --path "$repo_dir/game" --export-release "Android" "$repo_dir/build/release/RACESTARS-0.11-unsigned.apk"
-"$repo_dir/tools/package_windows.sh" 0.11
+godot --headless --path "$repo_dir/game" --export-release "Android" "$repo_dir/build/release/RACESTARS-0.12-unsigned.apk"
+"$repo_dir/tools/package_windows.sh" 0.12
 printf '%s\n' 'Assine o APK com a chave adequada antes de distribuir. O APK sem assinatura não é instalável.'

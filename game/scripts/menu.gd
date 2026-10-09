@@ -25,6 +25,7 @@ var args := {}
 var events: Array = [{"id": "grande", "name": "Grande Corrida", "type": "sprint", "laps": 1, "length": 119000.0}]
 
 func _ready() -> void:
+	preload("res://scripts/controls.gd").setup()
 	for a in OS.get_cmdline_user_args():
 		var s := String(a).trim_prefix("--")
 		var i := s.find("=")
@@ -62,6 +63,14 @@ func _ready() -> void:
 	elif not args.is_empty():
 		get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and not event.is_echo() and not loading_lbl.visible:
+		if races_box.visible:
+			_show(main_box)
+		elif join_box.visible or lobby_box.visible:
+			_on_leave()
+		get_viewport().set_input_as_handled()
+
 func _process(_dt: float) -> void:
 	# teste: o anfitrião começa sozinho quando chegam os jogadores pedidos
 	if args.has("host") and Net.online and multiplayer.is_server() and lobby_box.visible:
@@ -93,6 +102,10 @@ func _button(text: String, cb: Callable, accent := Color("#ffb347")) -> Button:
 		sb.border_color = accent
 		sb.set_border_width_all(4)
 		sb.set_corner_radius_all(22)
+		if st == "focus":
+			sb.border_color = Color.WHITE
+			sb.bg_color = Color(0.3, 0.22, 0.09, 0.95)
+			sb.set_border_width_all(6)
 		b.add_theme_stylebox_override(st, sb)
 	b.add_theme_color_override("font_color", Color("#fff1d6"))
 	b.add_theme_color_override("font_pressed_color", Color.WHITE)
@@ -269,6 +282,7 @@ func _show_loading() -> void:
 func _show(box: Control) -> void:
 	for b in [main_box, lobby_box, join_box, races_box]:
 		b.visible = b == box
+	preload("res://scripts/controls.gd").focus_first(box)
 
 # ------------------------------------------------------------------ ações
 func _on_solo(m: String) -> void:
@@ -317,13 +331,19 @@ func _on_leave() -> void:
 	status_lbl.text = ""
 
 func _refresh_hosts() -> void:
+	var owner := get_viewport().gui_get_focus_owner()
+	var restore := owner != null and hosts_box.is_ancestor_of(owner)
 	for c in hosts_box.get_children():
+		hosts_box.remove_child(c)
 		c.queue_free()
 	if Net.hosts.is_empty():
 		hosts_box.add_child(_label("(nenhuma ainda)", 26))
 	for ip in Net.hosts:
 		var h: Dictionary = Net.hosts[ip]
 		hosts_box.add_child(_button("%s  ·  %d jog." % [h.name, h.count], _join.bind(ip), Color("#5fe06a")))
+
+	if restore:
+		preload("res://scripts/controls.gd").focus_first(join_box)
 
 func _refresh_lobby() -> void:
 	if not lobby_box.visible:
@@ -350,3 +370,7 @@ func _refresh_lobby() -> void:
 		explore_btn.visible = false
 		start_btn.visible = false
 		event_btn.visible = false
+
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus == null or not focus.is_visible_in_tree() or (focus is Button and focus.disabled):
+		preload("res://scripts/controls.gd").focus_first(lobby_box)
