@@ -29,7 +29,7 @@ func capture(player: Node3D, cave: bool) -> void:
 	speed_mps = player.speed()
 	speed_ratio = player.speed_fraction()
 	throttle = 1.0 if running and not player.braking else 0.0
-	boost_ratio = clampf(player.boost / player.BOOST_MAX, 0.0, 1.0) if running else 0.0
+	boost_ratio = maxf(clampf(player.boost / player.BOOST_MAX, 0.0, 1.0), 1.0 if player.nitro_active else 0.0) if running else 0.0
 	steering = player.steer_visual
 	on_ground = player.on_ground
 	on_water = player.on_water

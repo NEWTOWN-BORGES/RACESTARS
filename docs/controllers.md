@@ -1,4 +1,4 @@
-# Comandos PS4 / PS5 — 0.12
+# Comandos PS4 / PS5 — 0.13
 
 No PC, ligar o DualShock 4 ou DualSense por USB (cabo com dados), ou emparelhar por
 Bluetooth nas definições do Windows. O jogo usa os mapeamentos normalizados do
@@ -11,6 +11,9 @@ de abrir o jogo. Não há seleção manual do dispositivo.
 | Travar / derrapar | L2 ou Quadrado + direção | ↓, S ou Espaço + direção |
 | Recuperar a nave | Triângulo | R |
 | Trocar câmera | Círculo durante a corrida | C |
+| Nitro | R2 ou X | Shift / botão NITRO no toque |
+| Olhar livremente | Analógico direito | — |
+| Recentrar câmera | R3 | V |
 | Pausar / continuar | Options | Esc |
 | Navegar nos menus | Direcional ou analógico | Setas |
 | Confirmar | X | Enter |

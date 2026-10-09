@@ -4,7 +4,7 @@ extends RefCounted
 static func setup() -> void:
 	var keys := {"steer_left": [KEY_LEFT, KEY_A], "steer_right": [KEY_RIGHT, KEY_D],
 		"brake": [KEY_DOWN, KEY_S, KEY_SPACE], "recover": [KEY_R],
-		"camera_cycle": [KEY_C], "pause_game": [KEY_ESCAPE]}
+		"camera_cycle": [KEY_C], "pause_game": [KEY_ESCAPE], "nitro": [KEY_SHIFT], "camera_center": [KEY_V]}
 	for action in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.18)
@@ -20,6 +20,16 @@ static func setup() -> void:
 	_axis("steer_left", JOY_AXIS_LEFT_X, -1.0)
 	_axis("steer_right", JOY_AXIS_LEFT_X, 1.0)
 	_axis("brake", JOY_AXIS_TRIGGER_LEFT, 1.0)
+	_axis("nitro", JOY_AXIS_TRIGGER_RIGHT, 1.0)
+	_button("nitro", JOY_BUTTON_A) # X durante a corrida
+	_button("camera_center", JOY_BUTTON_RIGHT_STICK)
+	for action in ["look_left", "look_right", "look_up", "look_down"]:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action, 0.18)
+	_axis("look_left", JOY_AXIS_RIGHT_X, -1.0)
+	_axis("look_right", JOY_AXIS_RIGHT_X, 1.0)
+	_axis("look_up", JOY_AXIS_RIGHT_Y, -1.0)
+	_axis("look_down", JOY_AXIS_RIGHT_Y, 1.0)
 	_button("steer_left", JOY_BUTTON_DPAD_LEFT)
 	_button("steer_right", JOY_BUTTON_DPAD_RIGHT)
 	_button("brake", JOY_BUTTON_X) # Quadrado
@@ -68,7 +78,10 @@ static func focus_first(parent: Node) -> bool:
 
 static func hint() -> String:
 	if not Input.get_connected_joypads().is_empty():
-		return "Analógico / direcional: virar · L2 / Quadrado: travar · Triângulo: recuperar · Options: pausa"
+		return "Analógico / direcional: virar · L2 / Quadrado: travar · Triângulo: recuperar · R2 / X: nitro · analógico direito: câmera"
 	if OS.has_feature("mobile"):
 		return "Esquerda do ecrã: virar · direita: TRAVÃO DE MÃO (travar + virar = derrapar)"
-	return "← → / A D: virar · ↓ / Espaço: travar · R: recuperar · C: câmera · Esc: pausa · Aceleração automática"
+	return "← → / A D: virar · ↓ / Espaço: travar · Shift: nitro · R: recuperar · C: câmera · Esc: pausa · Aceleração automática"
+
+static func nitro_touch_rect(size: Vector2) -> Rect2:
+	return Rect2(Vector2(size.x * 0.5 - 90.0, size.y - 96.0), Vector2(180, 72))

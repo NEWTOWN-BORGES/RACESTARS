@@ -48,6 +48,10 @@ var map_panel: Control
 var map_view: Control
 var map_hint: Label
 var _zone_t := 0.0
+var nitro_bar: ProgressBar
+var nitro_label: Label
+var _nitro_message := ""
+var _nitro_message_t := 0.0
 
 func _ready() -> void:
 	var fv := FontVariation.new()
@@ -103,6 +107,33 @@ func _ready() -> void:
 	bar.add_child(_button("CÂMARA", func(): camera_pressed.emit()))
 	bar.add_child(_button("MAPA", func(): open_map()))
 	bar.add_child(_button("II", func(): _toggle_pause()))
+	# Botão desenhado: os toques são lidos junto dos restantes controlos da nave.
+	var nitro_pad := Panel.new()
+	nitro_pad.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	nitro_pad.position = Vector2(-90, -96)
+	nitro_pad.size = Vector2(180, 72)
+	nitro_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var nitro_style := StyleBoxFlat.new()
+	nitro_style.bg_color = Color(0.02, 0.25, 0.32, 0.85)
+	nitro_style.border_color = Color("#62e9ff")
+	nitro_style.set_border_width_all(3)
+	nitro_style.set_corner_radius_all(16)
+	nitro_pad.add_theme_stylebox_override("panel", nitro_style)
+	root.add_child(nitro_pad)
+	nitro_label = Label.new()
+	_style(nitro_label, font_title, 22)
+	nitro_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	nitro_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nitro_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	nitro_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	nitro_pad.add_child(nitro_label)
+	nitro_bar = ProgressBar.new()
+	nitro_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	nitro_bar.position = Vector2(-180, -124)
+	nitro_bar.size = Vector2(360, 18)
+	nitro_bar.show_percentage = false
+	nitro_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(nitro_bar)
 	# classificação (PvP)
 	standings_label = RichTextLabel.new()
 	standings_label.bbcode_enabled = true
@@ -267,11 +298,20 @@ func show_results(is_host: bool) -> void:
 	preload("res://scripts/controls.gd").focus_first(results_panel)
 	_update_pause()
 
+func show_nitro_gain(amount: float, reason: String) -> void:
+	_nitro_message = "%s +%d" % [reason.replace("QUASE BATIDA", "QUASE"), roundi(amount)]
+	_nitro_message_t = 1.2
+
 func show_zone(text: String) -> void:
 	zone_label.text = text.to_upper()
 	_zone_t = 3.5
 
 func _process(dt: float) -> void:
+	if is_instance_valid(player):
+		nitro_bar.value = player.nitro_charge
+		_nitro_message_t = maxf(0.0, _nitro_message_t - dt)
+		nitro_label.text = _nitro_message if _nitro_message_t > 0.0 else "NITRO %d%%" % roundi(player.nitro_charge)
+		nitro_label.modulate = Color("#ffffff") if player.nitro_active else Color("#80eaff")
 	if _zone_t > 0.0:
 		_zone_t -= dt
 		zone_label.modulate.a = clampf(_zone_t / 0.8, 0.0, 1.0) * clampf((3.5 - _zone_t) / 0.4, 0.0, 1.0)

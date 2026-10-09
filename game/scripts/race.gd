@@ -111,6 +111,7 @@ func _ready() -> void:
 	player.scraped.connect(_on_scrape)
 	player.landed.connect(_on_land)
 	player.boosted.connect(_on_boost)
+	player.nitro_awarded.connect(hud.show_nitro_gain)
 	var st: Dictionary = ev.start
 	var start_pos := Vector3(st.p[0], st.p[1], st.p[2])
 	var start_dir := Vector2(st.dir[0], st.dir[1])

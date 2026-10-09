@@ -20,6 +20,12 @@ No horizonte há **estruturas colossais**, que se vêem a muitos km:
 
 ![Anel gigante nas Colinas Verdes](screenshots/01-anel.jpg)
 
+## Nitro e câmera livre — 0.13
+
+**R2 ou X / Shift / botão NITRO** ativa o nitro. Derrapagens, saltos completados e
+passagens próximas sem colisão recarregam a barra. O **analógico direito** controla
+a câmera; **R3** ou **V** recentra. [Funcionamento e testes](docs/nitro-camera.md).
+
 ## Comando PS4 / PS5 — 0.12
 
 Ligue o comando por USB ou Bluetooth ao PC. **Analógico esquerdo/direcional** vira;
@@ -37,7 +43,7 @@ recebem amortecimento. A câmera acompanha os declives e balança suavemente.
 reiniciar a corrida. A recuperação também atua após seis segundos sem avançar;
 manter o travão pressionado desativa essa deteção. [Detalhes e testes](docs/physics-011.md).
 
-## Perfil Samsung A15 / Estável — mantido na 0.12
+## Perfil Samsung A15 / Estável — mantido na 0.13
 
 No seletor de gráficos do menu, escolha **Gráficos: A15 (30 FPS)**. O jogo reconhece
 as famílias SM-A155 (4G) e SM-A156 (5G), ativando o perfil na primeira atualização
@@ -117,9 +123,10 @@ antes e depois de recortar a costa; `tools/island_check.py` verifica os dados gr
 
 ## Instalar no telemóvel (Android)
 
-**Versão 0.12:** acrescenta comandos PS4/PS5, direção analógica e navegação dos menus.
+**Versão 0.13:** acrescenta nitro recarregável com derrapagens, saltos e quase batidas,
+e câmera no analógico direito. Inclui suporte para comandos PS4/PS5 e menus.
 Inclui as correções de física e recuperação da 0.11.
-Mantém **Gráficos: A15 (30 FPS)**, Leve, Equilibrado e Alto. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.12/apk/RACESTARS.apk)
+Mantém **Gráficos: A15 (30 FPS)**, Leve, Equilibrado e Alto. [Baixar APK Android](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.13/apk/RACESTARS.apk)
 (Android 7 ou posterior, ARM64).
 
 Descarregue `apk/RACESTARS.apk` no telemóvel e toque em **Instalar**
@@ -222,7 +229,7 @@ java -jar uber-apk-signer.jar --apks build/RACESTARS-unsigned.apk   # assina (v2
 
 ## Instalar no Windows
 
-[Baixar instalador Windows 0.12](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.12/windows/RACESTARS-Setup.exe)
+[Baixar instalador Windows 0.13](https://github.com/NEWTOWN-BORGES/RACESTARS/raw/refs/tags/v0.13/windows/RACESTARS-Setup.exe)
 para Windows 10/11 de 64 bits. Execute o instalador; ele cria atalhos e um
 desinstalador, sem exigir administrador. O instalador não tem certificado
 comercial de assinatura, portanto o Windows pode mostrar um aviso de editor desconhecido.

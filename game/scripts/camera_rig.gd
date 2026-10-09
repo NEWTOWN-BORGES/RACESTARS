@@ -37,8 +37,12 @@ var _suspension := 0.0
 var _suspension_velocity := 0.0
 var _last_velocity := Vector3.ZERO
 var _was_grounded := false
+var _look_yaw := 0.0
+var _look_pitch := 0.0
+var _look_idle := 0.0
 
 func _ready() -> void:
+	preload("res://scripts/controls.gd").setup()
 	# Player (0) -> Race/amostra (10) -> pivôs (20) -> braço interno (30).
 	process_physics_priority = 20
 	arm.process_physics_priority = 30
@@ -77,6 +81,9 @@ func snap() -> void:
 	_shake = 0.0
 	_kick = 0.0
 	_t = 0.0
+	_look_yaw = 0.0
+	_look_pitch = 0.0
+	_look_idle = 0.0
 	_suspension = 0.0
 	_suspension_velocity = 0.0
 	_last_velocity = _state.velocity
@@ -117,6 +124,7 @@ func _physics_process(dt: float) -> void:
 	_t += dt
 	_shake = move_toward(_shake, 0.0, 1.8 * dt)
 	_kick = move_toward(_kick, 0.0, 2.5 * dt)
+	_update_look(dt)
 	_update_suspension(dt)
 	if first_person:
 		_apply_cockpit()
@@ -129,11 +137,29 @@ func _physics_process(dt: float) -> void:
 		_pitch = lerpf(_pitch, _target_pitch(_state), 1.0 - exp(-4.5 * dt))
 		var roll_target := _target_roll(_state)
 		_roll = lerpf(_roll, roll_target, 1.0 - exp(-6.0 * dt))
-		rotation_pivot.rotation = Vector3(_pitch, _yaw, _roll)
+		rotation_pivot.rotation = Vector3(clampf(_pitch + _look_pitch, -1.1, 0.8), _yaw + _look_yaw, _roll)
 		arm.spring_length = lerpf(arm.spring_length,
 			lerpf(19.0, 17.0, _state.speed_ratio), 1.0 - exp(-5.0 * dt))
 	camera.fov = lerpf(camera.fov, _target_fov(_state), 1.0 - exp(-5.0 * dt))
 	_apply_shake()
+
+func _update_look(dt: float) -> void:
+	if player.controls_blocked:
+		return
+	var stick := Vector2(Input.get_axis("look_left", "look_right"), Input.get_axis("look_up", "look_down"))
+	if Input.is_action_just_pressed("camera_center"):
+		_look_yaw = 0.0
+		_look_pitch = 0.0
+		_look_idle = 0.0
+	elif stick.length_squared() > 0.001:
+		_look_yaw = clampf(_look_yaw - stick.x * 2.6 * dt, -PI, PI)
+		_look_pitch = clampf(_look_pitch - stick.y * 1.7 * dt, -0.6, 0.6)
+		_look_idle = 0.0
+	else:
+		_look_idle += dt
+		if _look_idle > 1.5:
+			_look_yaw = lerpf(_look_yaw, 0.0, 1.0 - exp(-3.0 * dt))
+			_look_pitch = lerpf(_look_pitch, 0.0, 1.0 - exp(-3.0 * dt))
 
 func _target_pitch(state: FXState) -> float:
 	var pitch := state.pitch * 0.65
@@ -179,7 +205,7 @@ func _target_fov(state: FXState) -> float:
 func _apply_cockpit() -> void:
 	var model: Node3D = player.model
 	global_transform = Transform3D(
-		model.global_basis * Basis(Vector3.RIGHT, -0.06),
+		model.global_basis * Basis.from_euler(Vector3(-0.06 + _look_pitch, _look_yaw, 0)),
 		model.global_transform * Vector3(0.0, 2.55, 0.9))
 
 func _apply_shake() -> void:

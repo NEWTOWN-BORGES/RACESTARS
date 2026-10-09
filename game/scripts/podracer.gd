@@ -12,6 +12,7 @@ signal crashed                      # só para quedas no abismo (tratado pela co
 signal scraped(strength: float)     # raspão ou batida (o carro continua)
 signal landed(strength: float)
 signal boosted(amount: float)
+signal nitro_awarded(amount: float, reason: String)
 
 const MAX_SPEED := 125.0        # m/s (450 km/h)
 const ACCEL := 19.0
@@ -25,6 +26,8 @@ const HB_DECEL_STRAIGHT := 14.0 # travão de mão a direito: trava mais
 const BOOST_MAX := 16.0         # m/s a mais depois de uma boa derrapagem
 const PAD_PUSH := 18.0          # m/s que uma placa de aceleração dá
 const SPEED_CAP := 160.0        # nunca passa disto (576 km/h), nem com placas e descidas
+const NITRO_DRAIN := 25.0
+const NITRO_EXTRA := 30.0
 const HOVER := 1.1
 const SPRING := 70.0
 const DAMP := 16.75           # amortecimento quase crítico: aterra sem saltitar
@@ -47,6 +50,18 @@ var on_water := false
 var drifting := false
 var drift_charge := 0.0
 var boost := 0.0
+var nitro_charge := 50.0
+var nitro_active := false
+var nitro_requested := false
+var _jump_origin := Vector3.ZERO
+var _jump_eligible := false
+var _near_clock := 0.0
+var _near_id := RID()
+var _near_start := Vector3.ZERO
+var _near_failed := false
+var _near_last := RID()
+var _near_reward_t := -100.0
+var _near_collision_t := -100.0
 var slip := 0.0
 var ground_normal := Vector3.UP
 var ground_valid := false
@@ -117,6 +132,11 @@ func place(pos: Vector3, dir: Vector2, start_speed: float) -> void:
 	drifting = false
 	drift_charge = 0.0
 	boost = 0.0
+	nitro_active = false
+	_nitro_was_active = false
+	nitro_requested = false
+	_jump_eligible = false
+	_near_id = RID()
 	_air_time = 0.0
 	model.basis = Basis()
 	visual_pitch = 0.0
@@ -161,6 +181,7 @@ func _physics_process(dt: float) -> void:
 		_autopilot()
 	else:
 		_read_input()
+	_update_nitro(dt)
 	steer = move_toward(steer, steer_target, dt * 5.0)
 	var space := get_world_3d().direct_space_state
 	# Apoio central define contacto. Normais das extremidades antecipam mudanças
@@ -201,7 +222,7 @@ func _physics_process(dt: float) -> void:
 		var fwd := forward()
 		var along := vh.dot(fwd)
 		var side := vh - fwd * along
-		var top := MAX_SPEED * (WATER_SPEED if on_water else 1.0) + boost
+		var top := MAX_SPEED * (WATER_SPEED if on_water else 1.0) + boost + (NITRO_EXTRA if nitro_active else 0.0)
 		if braking:
 			along = move_toward(along, 10.0, (HB_DECEL if hb_turning else HB_DECEL_STRAIGHT) * dt)
 		elif on_ground:
@@ -211,6 +232,8 @@ func _physics_process(dt: float) -> void:
 				along = move_toward(along, top, ACCEL * (1.0 - 0.5 * clampf(along / MAX_SPEED, 0.0, 1.0)) * dt)
 		elif along > top:          # no ar o ar também trava um pouco o excesso
 			along = move_toward(along, top, ACCEL * 0.25 * dt)
+		if nitro_active:
+			along = move_toward(along, minf(top, SPEED_CAP), 42.0 * dt)
 		along = minf(along, SPEED_CAP)
 		# travão de mão: a traseira solta-se e a velocidade continua para onde ia (derrapagem)
 		var grip := (HB_GRIP if braking else GRIP) * (1.0 if on_ground else 0.08)
@@ -227,6 +250,7 @@ func _physics_process(dt: float) -> void:
 		# carga da derrapagem -> impulso ao largar
 		drifting = braking and on_ground and v > 30.0 and absf(slip) > 0.18
 		if drifting:
+			add_nitro(8.0 * dt, "DERRAPAGEM", false)
 			drift_charge = minf(drift_charge + dt, 2.5)
 		elif not braking:
 			if drift_charge > 0.6:
@@ -262,6 +286,14 @@ func _physics_process(dt: float) -> void:
 	else:
 		vel.y -= GRAVITY * dt
 		on_ground = false
+	if was_air and on_ground and _jump_eligible:
+		var jump_distance := Vector2(global_position.x - _jump_origin.x, global_position.z - _jump_origin.z).length()
+		if _air_time > 0.4 and jump_distance > 15.0:
+			add_nitro(clampf(_air_time * 12.0, 8.0, 24.0), "SALTO")
+		_jump_eligible = false
+	elif not was_air and not on_ground:
+		_jump_origin = global_position
+		_jump_eligible = running and speed() > 20.0
 	if on_ground and was_air and _air_time > 0.35 and landing_speed > 8.0:
 		landed.emit(landing_speed)
 	if on_ground and was_air:   # a suspensão encolhe na aterragem e o nariz bate
@@ -327,12 +359,67 @@ func _physics_process(dt: float) -> void:
 				vel.y = before.y
 			if wall_velocity.length() > 4.0 and worst > 20.0:
 				heading = lerp_angle(heading, atan2(-wall_velocity.x, -wall_velocity.z), 0.35)
+		if worst > 1.0:
+			_near_failed = true
+			_near_collision_t = _t
+		if worst > 10.0:
+			_jump_eligible = false
 		if worst > 6.0:
 			if autopilot and worst > 50.0:
 				print("  batida forte: impacto=", snappedf(worst, 0.1), " em ", global_position)
 			drift_charge = 0.0
 			scraped.emit(worst)
+	_update_near_miss(space, dt)
 	_update_visual(dt)
+
+func add_nitro(amount: float, reason: String, announce := true) -> void:
+	var gained := minf(maxf(amount, 0.0), 100.0 - nitro_charge)
+	nitro_charge = clampf(nitro_charge + gained, 0.0, 100.0)
+	if announce and gained > 0.5:
+		nitro_awarded.emit(gained, reason)
+
+func _update_nitro(dt: float) -> void:
+	nitro_active = running and not controls_blocked and not braking and nitro_requested and nitro_charge > 0.0
+	if nitro_active:
+		var starting := not _nitro_was_active
+		nitro_charge = maxf(0.0, nitro_charge - NITRO_DRAIN * dt)
+		if starting:
+			boosted.emit(NITRO_EXTRA)
+	_nitro_was_active = nitro_active
+
+var _nitro_was_active := false
+
+func _finish_near_miss() -> void:
+	if not _near_id.is_valid():
+		return
+	if not _near_failed and _t - _near_collision_t > 0.5 and global_position.distance_to(_near_start) > 6.0 and (_near_id != _near_last or _t - _near_reward_t > 8.0):
+		add_nitro(12.0, "QUASE BATIDA")
+		_near_last = _near_id
+		_near_reward_t = _t
+	_near_id = RID()
+
+func _update_near_miss(space: PhysicsDirectSpaceState3D, dt: float) -> void:
+	if not running or controls_blocked or speed() < 50.0:
+		_near_id = RID()
+		return
+	_near_clock -= dt
+	if _near_clock > 0.0:
+		return
+	_near_clock = 0.1 # dois raios a 10 Hz; mantém o orçamento A15
+	var right := forward().cross(Vector3.UP)
+	var from := global_position + Vector3.UP * 1.7
+	var found := RID()
+	for side: float in [-1.0, 1.0]:
+		var query := PhysicsRayQueryParameters3D.create(from, from + right * side * 7.0, SOLID_MASK, [get_rid()])
+		var hit := space.intersect_ray(query)
+		if not hit.is_empty() and absf(hit.normal.y) < 0.6:
+			found = hit.rid
+			break
+	if found != _near_id:
+		_finish_near_miss()
+		_near_id = found
+		_near_start = global_position
+		_near_failed = false
 
 func _support_probe(space: PhysicsDirectSpaceState3D, p: Vector3, rise: float) -> Dictionary:
 	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * rise, p + Vector3.DOWN * 14.0)
@@ -396,13 +483,19 @@ func _read_input() -> void:
 		input_left = false
 		input_right = false
 		braking = true
+		nitro_requested = false
 		return
 	var axis := Input.get_axis("steer_left", "steer_right")
 	var size := get_viewport().get_visible_rect().size
 	var touch_left := false
 	var touch_right := false
 	var touch_brake := false
+	var touch_nitro := false
+	var nitro_rect := preload("res://scripts/controls.gd").nitro_touch_rect(size)
 	for pos: Vector2 in _touches.values():
+		if nitro_rect.has_point(pos):
+			touch_nitro = true
+			continue
 		if pos.x < size.x * 0.5:
 			if pos.x < size.x * 0.18:
 				touch_left = true
@@ -416,6 +509,7 @@ func _read_input() -> void:
 	input_left = steer_target > 0.05
 	input_right = steer_target < -0.05
 	braking = Input.is_action_pressed("brake") or touch_brake
+	nitro_requested = Input.is_action_pressed("nitro") or touch_nitro
 
 # ------------------------------------------------------------------ piloto automático (testes)
 ## Desvio de obstáculos do piloto automático (testes): raios para a frente; foge para o lado
